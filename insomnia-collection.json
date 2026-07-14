@@ -1,0 +1,160 @@
+{
+  "_type": "export",
+  "__export_format": 4,
+  "__export_source": "task_crud_api",
+  "resources": [
+    {
+      "_id": "wrk_taskcrud",
+      "_type": "workspace",
+      "name": "task_crud_api",
+      "description": "CRUD REST API for tasks (Go + chi + Postgres). Import this into Insomnia, pick the 'Local' environment, and fire the requests top to bottom.",
+      "scope": "collection"
+    },
+    {
+      "_id": "env_base",
+      "_type": "environment",
+      "parentId": "wrk_taskcrud",
+      "name": "Base Environment",
+      "data": {
+        "base_url": "http://localhost:8090"
+      },
+      "dataPropertyOrder": {
+        "&": ["base_url"]
+      },
+      "metaSortKey": 1
+    },
+    {
+      "_id": "env_local",
+      "_type": "environment",
+      "parentId": "env_base",
+      "name": "Local",
+      "data": {
+        "base_url": "http://localhost:8090"
+      },
+      "dataPropertyOrder": {
+        "&": ["base_url"]
+      },
+      "metaSortKey": 2
+    },
+    {
+      "_id": "fld_tasks",
+      "_type": "request_group",
+      "parentId": "wrk_taskcrud",
+      "name": "tasks",
+      "description": "All /api/tasks endpoints.",
+      "metaSortKey": -1000
+    },
+    {
+      "_id": "req_health",
+      "_type": "request",
+      "parentId": "wrk_taskcrud",
+      "name": "Health check",
+      "method": "GET",
+      "url": "{{ _.base_url }}/health",
+      "body": {},
+      "headers": [],
+      "metaSortKey": -100
+    },
+    {
+      "_id": "req_list",
+      "_type": "request",
+      "parentId": "fld_tasks",
+      "name": "List tasks",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/tasks",
+      "body": {},
+      "headers": [],
+      "metaSortKey": -90
+    },
+    {
+      "_id": "req_create",
+      "_type": "request",
+      "parentId": "fld_tasks",
+      "name": "Create task",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/tasks",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"title\": \"buy milk\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "metaSortKey": -80
+    },
+    {
+      "_id": "req_read",
+      "_type": "request",
+      "parentId": "fld_tasks",
+      "name": "Read task by id",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/tasks/1",
+      "body": {},
+      "headers": [],
+      "metaSortKey": -70
+    },
+    {
+      "_id": "req_update",
+      "_type": "request",
+      "parentId": "fld_tasks",
+      "name": "Update task",
+      "method": "PUT",
+      "url": "{{ _.base_url }}/api/tasks/1",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"title\": \"buy oat milk\",\n  \"done\": true\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "metaSortKey": -60
+    },
+    {
+      "_id": "req_delete",
+      "_type": "request",
+      "parentId": "fld_tasks",
+      "name": "Delete task",
+      "method": "DELETE",
+      "url": "{{ _.base_url }}/api/tasks/1",
+      "body": {},
+      "headers": [],
+      "metaSortKey": -50
+    },
+    {
+      "_id": "req_read_missing",
+      "_type": "request",
+      "parentId": "fld_tasks",
+      "name": "Read missing (expect 404)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/tasks/99999",
+      "body": {},
+      "headers": [],
+      "metaSortKey": -40
+    },
+    {
+      "_id": "req_create_bad",
+      "_type": "request",
+      "parentId": "fld_tasks",
+      "name": "Create invalid (expect 400)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/tasks",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"title\": \"\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "metaSortKey": -30
+    }
+  ]
+}
