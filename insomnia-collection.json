@@ -7,7 +7,7 @@
       "_id": "wrk_taskcrud",
       "_type": "workspace",
       "name": "task_crud_api",
-      "description": "CRUD REST API for tasks (Go + chi + Postgres). Import this into Insomnia, pick the 'Local' environment, and fire the requests top to bottom.",
+      "description": "CRUD REST API for tasks and users (Go + chi + Postgres). Every route except GET /health and POST /api/users needs 'Authorization: Bearer {{ _.token }}'. Switch between the 'Local (Alice)' and 'Local (Bob)' environments to see per-user isolation.",
       "scope": "collection"
     },
     {
@@ -16,10 +16,11 @@
       "parentId": "wrk_taskcrud",
       "name": "Base Environment",
       "data": {
-        "base_url": "http://localhost:8090"
+        "base_url": "http://localhost:8090",
+        "token": "alice-token-123"
       },
       "dataPropertyOrder": {
-        "&": ["base_url"]
+        "&": ["base_url", "token"]
       },
       "metaSortKey": 1
     },
@@ -27,33 +28,271 @@
       "_id": "env_local",
       "_type": "environment",
       "parentId": "env_base",
-      "name": "Local",
+      "name": "Local (Alice, admin)",
       "data": {
-        "base_url": "http://localhost:8090"
+        "base_url": "http://localhost:8090",
+        "token": "alice-token-123"
       },
       "dataPropertyOrder": {
-        "&": ["base_url"]
+        "&": ["base_url", "token"]
       },
       "metaSortKey": 2
+    },
+    {
+      "_id": "env_local_bob",
+      "_type": "environment",
+      "parentId": "env_base",
+      "name": "Local (Bob, member)",
+      "data": {
+        "base_url": "http://localhost:8090",
+        "token": "bob-token-456"
+      },
+      "dataPropertyOrder": {
+        "&": ["base_url", "token"]
+      },
+      "metaSortKey": 3
+    },
+    {
+      "_id": "req_health",
+      "_type": "request",
+      "parentId": "wrk_taskcrud",
+      "name": "Health check (public)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/health",
+      "body": {},
+      "headers": [],
+      "metaSortKey": -2000
+    },
+    {
+      "_id": "fld_users",
+      "_type": "request_group",
+      "parentId": "wrk_taskcrud",
+      "name": "users",
+      "description": "Mounted at /api/users. Signup is public; everything else needs a token. You may only edit or delete yourself.",
+      "metaSortKey": -1000
+    },
+    {
+      "_id": "req_user_signup",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Sign up (public, returns token)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/users",
+      "description": "The only response that ever contains the token. Copy it into the environment's 'token' variable to act as this new user.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"carol@example.com\",\n  \"name\": \"Carol\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "metaSortKey": -990
+    },
+    {
+      "_id": "req_user_me",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Who am I",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/users/me",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -980
+    },
+    {
+      "_id": "req_user_list",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "List users",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/users",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -970
+    },
+    {
+      "_id": "req_user_read",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Read user by id",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/users/1",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -960
+    },
+    {
+      "_id": "req_user_update",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Update self",
+      "method": "PUT",
+      "url": "{{ _.base_url }}/api/users/1",
+      "description": "Works as Alice (user 1). Switch to the 'Local (Bob)' environment and the same request is a 403: you may only edit yourself.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"alice@example.com\",\n  \"name\": \"Alice A.\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -950
+    },
+    {
+      "_id": "req_user_update_other",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Update someone else (expect 403)",
+      "method": "PUT",
+      "url": "{{ _.base_url }}/api/users/2",
+      "description": "As Alice, editing Bob is 403 (forbidden), not 404. Users are listable, so hiding their existence would be pointless. Tasks are the opposite: those return 404.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"hacked@example.com\",\n  \"name\": \"Hacked\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -940
+    },
+    {
+      "_id": "req_user_dupe_email",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Sign up with taken email (expect 409)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/users",
+      "description": "Postgres raises unique_violation (23505) on the UNIQUE email constraint; the repository turns it into ErrConflict, which is a 409.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"alice@example.com\",\n  \"name\": \"Impostor\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "metaSortKey": -930
+    },
+    {
+      "_id": "req_user_bad_email",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Sign up with bad email (expect 400)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/users",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"not-an-email\",\n  \"name\": \"Carol\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "metaSortKey": -920
+    },
+    {
+      "_id": "req_user_missing",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Read missing user (expect 404)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/users/99999",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -910
+    },
+    {
+      "_id": "req_user_delete",
+      "_type": "request",
+      "parentId": "fld_users",
+      "name": "Delete self (cascades tasks)",
+      "method": "DELETE",
+      "url": "{{ _.base_url }}/api/users/3",
+      "description": "Deleting a user deletes their tasks too: tasks.user_id is ON DELETE CASCADE, so Postgres does it. Point this at a user you created via signup, not at Alice or Bob.",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -900
     },
     {
       "_id": "fld_tasks",
       "_type": "request_group",
       "parentId": "wrk_taskcrud",
       "name": "tasks",
-      "description": "All /api/tasks endpoints.",
-      "metaSortKey": -1000
+      "description": "Mounted at /api/tasks. Every route needs a token, and you only ever see your own tasks.",
+      "metaSortKey": -500
     },
     {
-      "_id": "req_health",
+      "_id": "req_no_token",
       "_type": "request",
-      "parentId": "wrk_taskcrud",
-      "name": "Health check",
+      "parentId": "fld_tasks",
+      "name": "List without token (expect 401)",
       "method": "GET",
-      "url": "{{ _.base_url }}/health",
+      "url": "{{ _.base_url }}/api/tasks",
       "body": {},
       "headers": [],
       "metaSortKey": -100
+    },
+    {
+      "_id": "req_bad_token",
+      "_type": "request",
+      "parentId": "fld_tasks",
+      "name": "List with bad token (expect 401)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/tasks",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer not-a-real-token"
+        }
+      ],
+      "metaSortKey": -95
     },
     {
       "_id": "req_list",
@@ -63,7 +302,12 @@
       "method": "GET",
       "url": "{{ _.base_url }}/api/tasks",
       "body": {},
-      "headers": [],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
       "metaSortKey": -90
     },
     {
@@ -81,6 +325,10 @@
         {
           "name": "Content-Type",
           "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
         }
       ],
       "metaSortKey": -80
@@ -93,7 +341,12 @@
       "method": "GET",
       "url": "{{ _.base_url }}/api/tasks/1",
       "body": {},
-      "headers": [],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
       "metaSortKey": -70
     },
     {
@@ -105,12 +358,16 @@
       "url": "{{ _.base_url }}/api/tasks/1",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"title\": \"buy oat milk\",\n  \"done\": true\n}"
+        "text": "{\n  \"title\": \"buy oat milk\"\n}"
       },
       "headers": [
         {
           "name": "Content-Type",
           "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
         }
       ],
       "metaSortKey": -60
@@ -123,8 +380,30 @@
       "method": "DELETE",
       "url": "{{ _.base_url }}/api/tasks/1",
       "body": {},
-      "headers": [],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
       "metaSortKey": -50
+    },
+    {
+      "_id": "req_other_users_task",
+      "_type": "request",
+      "parentId": "fld_tasks",
+      "name": "Read someone else's task (expect 404)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/tasks/3",
+      "description": "Task 3 belongs to Bob. As Alice this is a 404, not a 403: we don't reveal that it exists. Switch to the 'Local (Bob)' environment and it returns 200.",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -45
     },
     {
       "_id": "req_read_missing",
@@ -134,7 +413,12 @@
       "method": "GET",
       "url": "{{ _.base_url }}/api/tasks/99999",
       "body": {},
-      "headers": [],
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
       "metaSortKey": -40
     },
     {
@@ -152,9 +436,294 @@
         {
           "name": "Content-Type",
           "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
         }
       ],
       "metaSortKey": -30
+    },
+    {
+      "_id": "req_create_unknown_field",
+      "_type": "request",
+      "parentId": "fld_tasks",
+      "name": "Create unknown field (expect 400)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/tasks",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"titel\": \"typo in the key\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -25
+    },
+    {
+      "_id": "req_create_no_content_type",
+      "_type": "request",
+      "parentId": "fld_tasks",
+      "name": "Create without Content-Type (expect 415)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/tasks",
+      "body": {
+        "mimeType": "text/plain",
+        "text": "{\"title\":\"no content type header\"}"
+      },
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -20
+    },
+    {
+      "_id": "req_task_import",
+      "_type": "request",
+      "parentId": "fld_tasks",
+      "name": "Import tasks from public API",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/tasks/import?limit=5",
+      "description": "Fetches todos from jsonplaceholder.typicode.com, unmarshals them, saves them as your tasks. Uses the request context, so hanging up cancels it. Returns 502 if the upstream API is down.",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -15
+    },
+    {
+      "_id": "req_task_submit",
+      "_type": "request",
+      "parentId": "fld_tasks",
+      "name": "Submit task for review (member)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/tasks/4/submit",
+      "description": "pending -> submitted. Notifies every admin. Submitting an already-submitted task is a 409. Point the id at a task you own.",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -55
+    },
+    {
+      "_id": "fld_admin",
+      "_type": "request_group",
+      "parentId": "wrk_taskcrud",
+      "name": "admin (RBAC)",
+      "description": "Mounted at /api/admin behind RequireUser + RequireAdmin. Run these as 'Local (Alice, admin)'. Switch to Bob and every one returns 403.",
+      "metaSortKey": -450
+    },
+    {
+      "_id": "req_admin_queue",
+      "_type": "request",
+      "parentId": "fld_admin",
+      "name": "Review queue",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/admin/tasks?status=submitted",
+      "description": "Every user's tasks in a given state. status also accepts pending, approved, rejected; anything else is a 400.",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -90
+    },
+    {
+      "_id": "req_admin_approve",
+      "_type": "request",
+      "parentId": "fld_admin",
+      "name": "Approve task",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/admin/tasks/4/approve",
+      "description": "submitted -> approved (terminal). Notifies the task's owner. Approving anything not 'submitted' is a 409.",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -80
+    },
+    {
+      "_id": "req_admin_reject",
+      "_type": "request",
+      "parentId": "fld_admin",
+      "name": "Reject task",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/admin/tasks/4/reject",
+      "description": "submitted -> rejected. The member can then submit it again.",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -70
+    },
+    {
+      "_id": "fld_notifications",
+      "_type": "request_group",
+      "parentId": "wrk_taskcrud",
+      "name": "notifications",
+      "description": "Any authenticated user. Admins get told about submissions; members get told the verdict.",
+      "metaSortKey": -430
+    },
+    {
+      "_id": "req_notif_list",
+      "_type": "request",
+      "parentId": "fld_notifications",
+      "name": "List notifications",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/notifications",
+      "description": "Unread first, newest first.",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -90
+    },
+    {
+      "_id": "req_notif_read",
+      "_type": "request",
+      "parentId": "fld_notifications",
+      "name": "Mark notification read",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/notifications/1/read",
+      "description": "Somebody else's notification is a 404, not a 403.",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -80
+    },
+    {
+      "_id": "fld_webhooks",
+      "_type": "request_group",
+      "parentId": "wrk_taskcrud",
+      "name": "webhooks",
+      "description": "Mounted at /api/webhooks. Register a URL and every task you create is POSTed to it. Run `go run ./cmd/echo` and use http://localhost:9999/hook to watch deliveries locally.",
+      "metaSortKey": -400
+    },
+    {
+      "_id": "req_webhook_list",
+      "_type": "request",
+      "parentId": "fld_webhooks",
+      "name": "List webhooks",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/webhooks",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -90
+    },
+    {
+      "_id": "req_webhook_create_local",
+      "_type": "request",
+      "parentId": "fld_webhooks",
+      "name": "Register webhook (local echo receiver)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/webhooks",
+      "description": "Start the receiver first: go run ./cmd/echo",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"url\": \"http://localhost:9999/hook\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -80
+    },
+    {
+      "_id": "req_webhook_create_bad",
+      "_type": "request",
+      "parentId": "fld_webhooks",
+      "name": "Register invalid URL (expect 400)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/webhooks",
+      "description": "Only http:// and https:// are accepted.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"url\": \"ftp://example.com/hook\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        },
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -70
+    },
+    {
+      "_id": "req_webhook_delete",
+      "_type": "request",
+      "parentId": "fld_webhooks",
+      "name": "Delete webhook",
+      "method": "DELETE",
+      "url": "{{ _.base_url }}/api/webhooks/1",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -60
+    },
+    {
+      "_id": "req_read_bad_id",
+      "_type": "request",
+      "parentId": "fld_tasks",
+      "name": "Read non-numeric id (expect 400)",
+      "method": "GET",
+      "url": "{{ _.base_url }}/api/tasks/abc",
+      "body": {},
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {{ _.token }}"
+        }
+      ],
+      "metaSortKey": -10
     }
   ]
 }
