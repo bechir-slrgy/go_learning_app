@@ -1,0 +1,129 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+
+	"task_crud_api/internal/model"
+)
+
+type TaskRepo struct {
+	db *sql.DB
+}
+
+func NewTaskRepo(db *sql.DB) *TaskRepo {
+	return &TaskRepo{db: db}
+}
+
+const taskColumns = `id, user_id, title, status, reviewed_by, reviewed_at, created_at`
+
+func scanTask(row scanner) (model.Task, error) {
+	var t model.Task
+
+	err := row.Scan(&t.ID, &t.UserID, &t.Title, &t.Status,
+		&t.ReviewedBy, &t.ReviewedAt, &t.CreatedAt)
+	return t, err
+}
+
+func (r *TaskRepo) List(ctx context.Context, userID int) ([]model.Task, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+taskColumns+` FROM tasks WHERE user_id = $1 ORDER BY id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	return collectTasks(rows)
+}
+
+func (r *TaskRepo) Get(ctx context.Context, userID, id int) (model.Task, error) {
+	t, err := scanTask(r.db.QueryRowContext(ctx,
+		`SELECT `+taskColumns+` FROM tasks WHERE id = $1 AND user_id = $2`, id, userID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Task{}, model.ErrNotFound
+	}
+	return t, err
+}
+
+func (r *TaskRepo) Create(ctx context.Context, userID int, title string) (model.Task, error) {
+	return scanTask(r.db.QueryRowContext(ctx,
+		`INSERT INTO tasks (user_id, title) VALUES ($1, $2) RETURNING `+taskColumns,
+		userID, title))
+}
+
+func (r *TaskRepo) Update(ctx context.Context, userID, id int, title string) (model.Task, error) {
+	t, err := scanTask(r.db.QueryRowContext(ctx,
+		`UPDATE tasks SET title = $1 WHERE id = $2 AND user_id = $3 RETURNING `+taskColumns,
+		title, id, userID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Task{}, model.ErrNotFound
+	}
+	return t, err
+}
+
+func (r *TaskRepo) Delete(ctx context.Context, userID, id int) error {
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM tasks WHERE id = $1 AND user_id = $2`, id, userID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return model.ErrNotFound
+	}
+	return nil
+}
+
+func (r *TaskRepo) GetAny(ctx context.Context, id int) (model.Task, error) {
+	t, err := scanTask(r.db.QueryRowContext(ctx,
+		`SELECT `+taskColumns+` FROM tasks WHERE id = $1`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Task{}, model.ErrNotFound
+	}
+	return t, err
+}
+
+func (r *TaskRepo) ListByStatus(ctx context.Context, status model.TaskStatus) ([]model.Task, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+taskColumns+` FROM tasks WHERE status = $1 ORDER BY id`, status)
+	if err != nil {
+		return nil, err
+	}
+	return collectTasks(rows)
+}
+
+func (r *TaskRepo) SetStatus(ctx context.Context, id int, status model.TaskStatus) (model.Task, error) {
+	t, err := scanTask(r.db.QueryRowContext(ctx,
+		`UPDATE tasks SET status = $1, reviewed_by = NULL, reviewed_at = NULL
+		 WHERE id = $2 RETURNING `+taskColumns, status, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Task{}, model.ErrNotFound
+	}
+	return t, err
+}
+
+func (r *TaskRepo) SetReviewed(ctx context.Context, id int, status model.TaskStatus, reviewerID int) (model.Task, error) {
+	t, err := scanTask(r.db.QueryRowContext(ctx,
+		`UPDATE tasks SET status = $1, reviewed_by = $2, reviewed_at = now()
+		 WHERE id = $3 RETURNING `+taskColumns, status, reviewerID, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Task{}, model.ErrNotFound
+	}
+	return t, err
+}
+
+func collectTasks(rows *sql.Rows) ([]model.Task, error) {
+	defer rows.Close()
+
+	tasks := []model.Task{}
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
