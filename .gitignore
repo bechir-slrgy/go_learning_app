@@ -3,3 +3,9 @@
 
 # Build output
 *.exe
+
+# Local run logs
+server.out
+server.err
+echo.out
+echo.err
