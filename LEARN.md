@@ -1,89 +1,159 @@
 # LEARN.md — What every file does and why it matters
 
-A guided tour of `task_crud_api/`. For each file: **what it is**, **why it exists**, and **what breaks without it**. Files are grouped by role, not alphabetically, so the architecture reads top to bottom.
+A guided tour of `task_crud_api/`. For each file: **what it is**, **why it
+exists**, and **what breaks without it**. Grouped by role, not alphabetically,
+so the architecture reads top to bottom.
+
+The source has no comments in it, by choice. That makes this file the place
+where the reasoning lives, so it is worth keeping honest.
 
 ```
 task_crud_api/
-├── cmd/api/main.go          wiring + the root router that mounts the rest
-├── internal/                the app, split into layers
-│   ├── model/
-│   │   ├── task.go          Task, TaskInput, field rules (Validate)
-│   │   ├── user.go          User, UserWithToken, UserInput + Validate
-│   │   └── errors.go        the five sentinel errors
-│   ├── repository/
-│   │   ├── db.go            *sql.DB + lib/pq driver, ping on startup
-│   │   ├── task.go          the only file that knows task SQL
-│   │   └── user.go          user SQL + token lookup
-│   ├── service/
-│   │   ├── task.go          business rules; runs validation, calls the repo
-│   │   └── user.go          same, plus token generation and the self-only rule
-│   └── handler/
-│       ├── task.go          TaskHandler + its own /tasks router
-│       ├── user.go          UserHandler + its own /users router
-│       ├── middleware.go    Auth.RequireUser: token → user → request context
-│       ├── errors.go        respondError: one error → status code map
-│       └── http.go          Health, decodeJSON, parseID, writeJSON
-├── Go module (dependencies + build)
-│   ├── go.mod               module name, Go version, direct deps
-│   └── go.sum               cryptographic checksums of every dep
-├── Infrastructure (the database)
-│   ├── docker-compose.yml   defines the Postgres container
-│   └── initdb/schema.sql    creates + seeds users and tasks on first boot
-├── Config
-│   ├── .env                 real PORT + DATABASE_URL (gitignored)
-│   └── .env.example         committable template
-└── Tooling & docs
-    ├── insomnia-collection.json   ready-made API requests to import
-    ├── README.md                  how to run it
-    └── LEARN.md                   this file
+├── cmd/                          one directory per binary
+│   ├── api/                      the server
+│   │   ├── main.go               signals, then Load -> NewServer -> Run
+│   │   ├── config.go             every env var, read once
+│   │   └── server.go             wiring, routes, graceful shutdown
+│   └── echo/main.go              dev-only webhook receiver
+├── internal/                     importable only by this module
+│   ├── model/                    the domain: types, rules, sentinel errors
+│   ├── repository/               the only code that writes SQL
+│   ├── service/                  business rules
+│   ├── handler/                  HTTP in
+│   ├── client/                   HTTP out
+│   └── response/                 JSON out, error -> status code
+├── frontend/                     React + Vite + TypeScript UI
+├── docs/
+│   ├── ERD.md                    database diagram, from the live DB
+│   └── screenshots/              the approval workflow, end to end
+├── initdb/schema.sql             runs once on an empty Postgres volume
+├── docker-compose.yml            Postgres 17 on host port 5433
+├── go.mod / go.sum               module + checksums
+├── .env / .env.example           config (.env is gitignored)
+└── insomnia-collection.json      importable API requests
 ```
 
-**Dependencies point one way:** `handler` → `service` → `repository` → `model`. Nothing points back. `model` imports none of them, which is why both the repository and the handler can share the sentinel errors without importing each other.
+**Dependencies point one way:** `handler` → `service` → `repository` → `model`.
+`response` and `client` are leaves. Nothing points back, and `model` imports
+none of them, which is why every layer can share the sentinel errors without
+importing each other.
 
-**Why `internal/`?** It's a magic directory name in Go: packages under `internal/` can only be imported by code in the same module. The compiler enforces your architecture. If this project were ever imported by someone else, they could reach `cmd/` but never your handlers or SQL.
+**Why `internal/`?** It is a compiler rule, not a convention: packages under
+`internal/` can only be imported from inside the same module. Publish this repo
+and nobody can reach your handlers or your SQL. It is the one access-control
+keyword Go has, spelled as a directory name.
 
 ---
 
 ## The entry point
 
-### `cmd/api/main.go` — wiring and mounting
-**What:** `func main()`. Loads `.env`, opens the database, constructs repository → service → handler for both resources, builds the root router, mounts each sub-router, starts the server.
+### `cmd/api/config.go`
+**What:** A `Config` struct and `LoadConfig`, reading `PORT` and `DATABASE_URL`
+with fallbacks.
 
-**Why it matters:** `func main()` is a hard requirement for any runnable Go program, and this is the only file that has one. It is mostly **composition** — the dependency graph gets assembled here, in one readable place, and every layer receives its dependency instead of reaching for a global. That's constructor injection, same idea as Spring's `@Autowired` constructors or passing collaborators into a Python class `__init__`, just done by hand.
+**Why it matters:** Nothing else in the program calls `os.Getenv`, so there is
+one place to see everything that is configurable. Passing the URL into
+`MustConnect` rather than letting the repository read the environment is what
+lets you point the same code at a different database (a test one, for instance).
 
-It also owns the **route map**, and only the map:
+### `cmd/api/server.go`
+**What:** The `Server` struct (config, db, router), `NewServer` which wires
+every layer, and `Run` which owns the lifecycle.
+
+**Why it matters:** Two jobs, both worth reading.
+
+**Wiring.** The whole dependency graph is assembled in one readable place, and
+each layer is handed what it needs instead of reaching for a global. That is
+constructor injection, the same idea as Spring's `@Autowired` constructors,
+done by hand. Go has no DI container and does not want one.
+
+**The route map**, and only the map:
 ```go
-r := chi.NewRouter()
-r.Use(middleware.Logger)
-r.Use(middleware.Recoverer)
-
 r.Get("/health", handler.Health)
 r.Mount("/api/tasks", taskHandler.Router())
 r.Mount("/api/users", userHandler.Router())
+r.Mount("/api/webhooks", webhookHandler.Router())
+r.Mount("/api/notifications", noteHandler.Router())
+r.Mount("/api/admin", adminHandler.Router())
 ```
-`Mount` hangs a whole sub-router off a prefix. Each handler declares its routes with **relative** paths (`/`, `/{id}`) and has no idea it lives under `/api/tasks` — so the URL layout is one readable block here rather than a prefix repeated across six registrations. Move the API to `/v2/tasks` and you edit one line.
+`Mount` hangs a whole sub-router off a prefix. Each handler declares its routes
+with **relative** paths and has no idea it lives under `/api/tasks`, so the URL
+layout is one block here instead of a prefix repeated across six registrations.
 
-Middleware nests: `Logger` and `Recoverer` are on the root, so they wrap everything including `/health`; `RequireUser` is inside each sub-router, so it guards only what it should.
+**Graceful shutdown.** `ListenAndServe` blocks, so it runs in a goroutine and
+reports a real failure (port already in use) back on a channel. `Run` then waits
+on either that channel or `ctx.Done()`. On a signal it stops accepting new
+connections, gives in-flight requests 10s to finish, and closes the database.
 
-**Why `cmd/api/` and not the root?** The convention scales: a project later grows `cmd/worker/`, `cmd/migrate/`, `cmd/cli/`, each a separate `main` package with its own binary name, all sharing the same `internal/` code.
+`middleware.Timeout(5 * time.Second)` is the line that makes the `ctx` threaded
+through every query actually do something: when it fires, the request's context
+is cancelled, which reaches `QueryContext`, and lib/pq aborts the running query
+instead of leaving it to pin a connection.
 
-**Without it:** No program. `go run ./cmd/api` has nothing to start.
+### `cmd/api/main.go`
+**What:** Barely twenty lines. `godotenv.Load()`, `signal.NotifyContext`, then
+`NewServer(LoadConfig())` and `Run`.
+
+**Why it matters:** `signal.NotifyContext` returns a context cancelled on
+SIGINT (Ctrl+C) or SIGTERM (what `docker stop` sends). That cancellation is the
+shutdown trigger `Run` waits on, so the whole lifecycle is expressed as a
+context rather than a signal handler squirrelled away somewhere.
+
+### `cmd/echo/main.go`
+**What:** A throwaway HTTP server on `:9999/hook` that prints whatever JSON it
+receives.
+
+**Why it matters:** It is how you watch webhook delivery without depending on
+httpbin or postman-echo (both were slow or unreachable during development). It
+is also why `cmd/` has subdirectories at all: one module, two binaries, because
+a package can only have one `func main()`.
+
+Dev-only. Nothing imports it and deleting the folder breaks nothing.
 
 ---
 
 ## `internal/model` — the domain
 
 ### `model/task.go`
-**What:** `Task` (the full record with `json:"..."` tags), `TaskInput` (the DTO for create/update bodies), and `Validate()`.
+**What:** `Task`, `TaskInput`, and the `TaskStatus` state machine.
 
-**Why it matters:** `Task` is the shape that travels between database, code, and the wire. The struct tags are what make `{"id":1,...}` come out lowercase even though Go fields must be capitalized (capitalized = *exported* = visible to the JSON encoder). `TaskInput` exists so clients **cannot** set server-owned fields like `id` or `created_at` — the database generates those. `Validate()` lives next to the struct it validates, so the rules can't drift away from the fields. It trims the title first, which is why `"   "` is rejected as empty.
+**Why it matters:** `TaskStatus` is a **named string type**, not a bare string,
+so the compiler rejects a typo where a status is expected. The lifecycle lives
+in one method:
 
-**Without it:** No type to decode requests into or encode responses from; nothing else compiles.
+```go
+func (s TaskStatus) CanTransitionTo(next TaskStatus) bool
+```
+
+```
+pending  --submit(member)-->  submitted  --approve(admin)-->  approved (terminal)
+                                  |
+                                  +-------reject(admin)---->  rejected
+                                                                  |
+                                  <------resubmit(member)---------+
+```
+
+Handlers and services ask this one question instead of each inventing their own
+`if`, which is how state machines quietly grow contradictions. `TaskInput`
+deliberately carries **no status**: changes go through the submit/approve/reject
+endpoints, which enforce the rules. Letting `PUT` set it directly would route
+around the machine entirely.
+
+The `json:"..."` tags **are the API contract**. Go only marshals exported
+(capitalized) fields, and without a tag it uses the Go field name verbatim, so
+dropping them turns `{"id":1}` into `{"ID":1}` and breaks every client.
+
+`ReviewedBy` and `ReviewedAt` are **pointers** because those columns are NULL
+until someone reviews the task. A `*int` marshals to JSON `null` where a plain
+`int` would silently claim the reviewer was user 0.
 
 ### `model/user.go`
-**What:** `User` (`ID`, `Email`, `Name`, `CreatedAt`), `UserWithToken`, and `UserInput` + `Validate`.
+**What:** `Role`, `User`, `UserWithToken`, `UserInput` + `Validate`.
 
-**Why it matters:** Look at what's **missing** from `User`: there is no `APIToken` field. The token is matched inside `UserRepo.ByToken` as a `WHERE` argument and never selected back out, so it cannot accidentally appear in a JSON response. The safest way to not leak a secret is to never load it into memory in the first place.
+**Why it matters:** Look at what is **missing** from `User`: there is no
+`APIToken` field. The token is only ever a `WHERE` argument and never a selected
+column, so it cannot leak into a response. The safest way to not leak a secret
+is to never load it.
 
 `UserWithToken` is the one exception, returned only by signup:
 ```go
@@ -92,328 +162,401 @@ type UserWithToken struct {
 	Token string `json:"token"`
 }
 ```
-That's **struct embedding**: `User` is declared with no field name, so its fields are promoted — `u.Email` works directly, and the JSON comes out as one flat object with an extra `"token"` key rather than a nested `{"user":{...}}`. It's Go's composition answer to inheritance: you get the fields and methods without a subclass relationship.
+That is **struct embedding**: `User` is declared with no field name, so its
+fields are promoted and the JSON comes out flat with one extra key rather than
+nested. Go's composition answer to inheritance.
 
-`Validate` uses `net/mail.ParseAddress` rather than a hand-rolled regex. Email syntax is a genuinely gnarly spec; the standard library already implements it.
+`Validate` uses `net/mail.ParseAddress` rather than a regex, because email
+syntax is a genuinely gnarly spec the standard library already implements.
 
 ### `model/errors.go`
-**What:** Five sentinels: `ErrNotFound`, `ErrInvalid`, `ErrUnauthorized`, `ErrForbidden`, `ErrConflict`.
+**What:** Six sentinels: `ErrNotFound`, `ErrInvalid`, `ErrUnauthorized`,
+`ErrForbidden`, `ErrConflict`, `ErrUpstream`.
 
-**Why it matters:** A **sentinel error** is one value, declared once, compared by identity with `errors.Is`. They live in `model` because both the repository/service (which return them) and the handler (which checks them) need them, and neither should import the other.
+**Why it matters:** A sentinel is one value, declared once, compared by identity
+with `errors.Is`. They live in `model` because every layer needs them and none
+should import another.
 
-`Validate` wraps: `fmt.Errorf("%w: title is required", ErrInvalid)`. The `%w` verb is what makes the wrapper still *count as* `ErrInvalid` — `errors.Is` unwraps the chain looking for that exact value. Use `%v` instead and the link is severed: the message reads the same, but `errors.Is` returns false and your 400 becomes a 500.
+Validation wraps rather than returns them bare:
+```go
+return fmt.Errorf("%w: title is required", ErrInvalid)
+```
+The `%w` verb is the whole trick: you get a new error carrying your message, and
+`errors.Is` still finds `ErrInvalid` inside it. Swap `%w` for `%v` and the text
+looks identical while `errors.Is` quietly returns false, so the 400 becomes a
+500. One letter.
 
-> **The trap:** `errors.Is` compares *identity*, not text. Returning a fresh `errors.New("not found")` from the repository creates a different value, `errors.Is` returns false, and your 404 silently becomes a 500. Declare the sentinel once, always return (or `%w`-wrap) that variable.
+> **The trap:** `errors.Is` compares *identity*, not text. A fresh
+> `errors.New("not found")` is a different value that merely reads the same, so
+> the check fails and your 404 becomes a 500. Declare each sentinel once, then
+> always return that variable or `%w`-wrap it.
+
+### `model/webhook.go`, `model/notification.go`
+`Webhook` + `WebhookInput` (whose `Validate` accepts only `http`/`https`, so a
+caller cannot point the client at `file://`), `TaskEvent` (the outgoing webhook
+body), and `Notification`.
 
 ---
 
-## `internal/repository` — the data-access layer
+## `internal/repository` — the only code that knows SQL
 
-### `repository/db.go` — the connection pool
-**What:** `MustConnect()` opens a `*sql.DB` from `DATABASE_URL`, pings it, and dies loudly if Postgres is unreachable.
+### `repository/db.go`
+**What:** `MustConnect(url)`: opens the pool, sets limits, pings, or kills the
+process.
 
-**Why it matters:** `*sql.DB` is **already a pool**, not a single connection — the name is misleading. It's safe for concurrent use and hands out connections as requests need them, with sensible defaults you only tune once you have a reason (`SetMaxOpenConns` and friends). Two things worth remembering:
-- `sql.Open` is **lazy**: it validates the URL but connects to nothing. `Ping` is what actually reaches the database, which is why the app fails fast at startup instead of on the first request.
-- The `_ "github.com/lib/pq"` **blank import** looks like dead code but isn't. Importing it for its side effect runs the package's `init()`, which registers the driver named `"postgres"` with `database/sql`. Without that line, `sql.Open("postgres", ...)` fails with `unknown driver`.
+**Why it matters:** `*sql.DB` is **already a pool**, despite the name. Never
+open one per request. Two things worth remembering:
 
-**Without it:** No pool to run queries against.
+- `sql.Open` is **lazy**: it validates the URL and connects to nothing.
+  `PingContext` is the first real network call, which is why it belongs at
+  startup with a timeout — a dead database fails in 5s instead of hanging.
+- The `_ "github.com/lib/pq"` **blank import** looks like dead code. It is not.
+  Importing for the side effect runs the package's `init()`, which registers the
+  driver named `"postgres"`. Delete the line and `sql.Open("postgres", ...)`
+  fails with `unknown driver`. **This is the single most deletable-looking
+  load-bearing line in the codebase.**
 
-### `repository/user.go` — user SQL + token lookup
-**What:** `ByToken`, plus the CRUD five: `List`, `Get`, `Create`, `Update`, `Delete`.
+`SetMaxOpenConns(25)` matters because without a cap the pool opens a connection
+per concurrent request, and Postgres refuses past `max_connections` (100 by
+default) — an unbounded pool turns a traffic spike into errors.
 
-**Why it matters:** `ByToken` is the entire authentication check, in one query. `sql.ErrNoRows` (no user has that token) becomes `ErrUnauthorized` rather than `ErrNotFound`, because from the client's side "your token is bad" is a 401, not a 404. Same translation trick as tasks, different sentinel.
+### `repository/task_repository.go`
+**What:** The task queries, split into two groups.
 
-`Create` and `Update` translate a second kind of database failure:
-```go
-func isUniqueViolation(err error) bool {
-	var pqErr *pq.Error
-	return errors.As(err, &pqErr) && pqErr.Code == "23505"
-}
-```
-The `UNIQUE` constraint on `email` is enforced by Postgres, not by a "does this email exist?" check in Go — a check like that has a race between the lookup and the insert, and two simultaneous signups would slip through. Let the database be the referee, then translate its complaint: `23505` is `unique_violation`, which becomes `ErrConflict`, which becomes a **409**. Without this the client would get a 500 for a mistake they could fix.
-
-Note `errors.As` here, not `errors.Is`: we need the `*pq.Error` **value** to read its `Code`. Matching on the message text instead would break across Postgres versions and locales; the code is stable and documented.
-
-This is also the first named import of lib/pq. `db.go` still blank-imports it to register the driver; that stays, because it's the line that documents *why* the driver exists.
-
-### `repository/task.go` — the only file that knows SQL
-**What:** `TaskRepo` with `List`, `Get`, `Create`, `Update`, `Delete`. Each runs parameterized SQL and scans rows into `model.Task` via the shared `scanTask` helper.
-
-**Ownership lives here.** Every method takes a `userID` and every query filters on it:
+**Member-scoped** (`List`, `Get`, `Create`, `Update`, `Delete`) take a `userID`
+and every query filters on it:
 ```sql
 SELECT ... FROM tasks WHERE id = $1 AND user_id = $2
 ```
-The filter is in the `WHERE` clause, not an `if` in the handler. A task you don't own produces zero rows, which becomes `ErrNotFound`, which becomes a **404**. That is deliberate: a 403 ("forbidden") would confirm the task exists. A 404 tells an attacker nothing. Enforcing this in SQL rather than in Go also means you cannot forget the check on a new method and quietly leak everyone's data — the query simply won't return rows that aren't yours.
+The filter is in the `WHERE` clause, not an `if` in the handler. A task you do
+not own produces zero rows, which becomes `ErrNotFound`, which becomes **404**.
+That is deliberate: a **403 would confirm the task exists**. It also fails
+closed — forget the filter on a new method and the query returns nothing, rather
+than leaking everyone's data.
 
-**Why it matters:** Swap Postgres for MySQL and you rewrite **this file only**. It shows the three `database/sql` calls:
-- `QueryRowContext` → exactly one row (get by id, `INSERT ... RETURNING`).
-- `QueryContext` → many rows (list). Loop `rows.Next()`, then check `rows.Err()`.
-- `ExecContext` → no rows (delete). Read `RowsAffected()` — note it returns `(int64, error)`, unlike pgx's single value.
+**Privileged** (`GetAny`, `ListByStatus`, `SetStatus`, `SetReviewed`) are *not*
+user-scoped, and the names say so, because the caller is responsible for having
+checked the role first.
 
-It also owns error translation: `sql.ErrNoRows` becomes `model.ErrNotFound`, which lets the handler return a clean 404 instead of a 500. Every query uses `$1`, `$2` placeholders — **never** string concatenation — which is what prevents SQL injection.
+`SetStatus` clears `reviewed_by`/`reviewed_at`; `SetReviewed` sets them with
+`now()` from Postgres. That split is what keeps the audit columns describing the
+*current* status: resubmitting after a rejection must not keep the stale
+reviewer, and the database's CHECK would reject the row if it did.
 
-The little `scanner` interface (`interface{ Scan(dest ...any) error }`) is satisfied by both `*sql.Row` and `*sql.Rows`, so one helper serves both the single-row and many-row queries. Nobody declares they implement it; they just have the method.
+Note `RowsAffected()` returns `(int64, error)` in `database/sql`, unlike pgx's
+single value.
 
-**Without it:** No persistence.
+### `repository/user_repository.go`
+`ByToken` is the entire authentication check, one query. `sql.ErrNoRows` becomes
+`ErrUnauthorized` rather than `ErrNotFound`, because "your token is bad" is a
+401.
+
+`Create`/`Update` translate a second failure:
+```go
+var pqErr *pq.Error
+return errors.As(err, &pqErr) && pqErr.Code == "23505"
+```
+Uniqueness is enforced by Postgres, **not** by a "does this email exist?" check
+in Go — that has a race between the lookup and the insert, and two simultaneous
+signups slip through. Let the database referee, then translate: `23505` is
+`unique_violation`, which becomes `ErrConflict`, which becomes **409**.
+
+`errors.As` here, not `errors.Is`, because we need the `*pq.Error` **value** to
+read its `.Code`. Matching on message text would break across versions and
+locales.
+
+### `repository/webhook_repository.go`, `notification_repository.go`
+Same shape. Notifications list unread-first, which is what the composite index
+`(user_id, read)` serves.
 
 ---
 
 ## `internal/service` — the business rules
 
-### `service/user.go`
-**What:** The user rules: validation, token generation, and "you may only edit yourself".
+Each service **declares the interfaces it consumes**, so the concrete
+repositories satisfy them implicitly and neither package imports the other.
 
-**Why it matters:** It stopped being a pass-through the moment users got CRUD. Two rules live here and nowhere else:
+### `service/task_service.go`
+**What:** `TaskService` plus the approval workflow and the importer.
 
-**Token generation** — signup mints the token, and this is the only moment it's ever visible:
+- `Submit` — ownership comes free from the user-scoped `Get` (someone else's
+  task is 404), then the state machine guards the move, then admins are alerted.
+- `Review` — approve and reject share one path so the guard cannot be forgotten
+  on one of them. It uses `GetAny` because an admin reviews other people's work
+  by definition, and `SetReviewed` to record the audit trail.
+- `Import` — fetches todos from a public API, unmarshals into an **unexported**
+  `externalTodo` (somebody else's shape is not our domain model), and saves them.
+
+Two context decisions live here, and they are opposites on purpose:
+
+| Operation | Context | Why |
+|---|---|---|
+| `Import` | the request's `ctx` | the caller is waiting for the result, so abandoning work when they hang up is right |
+| webhook delivery | detached (see below) | the caller is not waiting; delivery must outlive the response |
+
+An imported todo the source calls "completed" enters the **review queue**, not
+`approved`. Importing must not be a way to approve your own work.
+
+### `service/user_service.go`
+Signup mints the token:
 ```go
-func newToken() (string, error) {
-	b := make([]byte, 24)
-	if _, err := rand.Read(b); err != nil {   // crypto/rand
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
-}
+b := make([]byte, 24)
+rand.Read(b)          // crypto/rand
+hex.EncodeToString(b)
 ```
-`crypto/rand`, never `math/rand`. `math/rand` is a deterministic sequence from a seed: fast, repeatable, and completely predictable to anyone who can guess the seed. A predictable token is not a token. The two packages have nearly the same API, which is exactly why this mistake is common.
+**`crypto/rand`, never `math/rand`.** `math/rand` is a deterministic sequence
+from a seed: fast, repeatable, and predictable to anyone who can guess it. A
+predictable token is not a token. The two packages have nearly identical APIs,
+which is exactly why this mistake is common.
 
-**Self-only edits** — `callerID` comes from the token, `id` from the URL:
+`Update`/`Delete` enforce "you may only edit yourself" by comparing the caller's
+id (from the token) with the id in the URL. That rule *cannot* live in a `WHERE`
+clause the way task ownership does, because the question is not "which rows can
+you see" but "which row may you write".
+
+### `service/webhook_service.go`
+Delivery, and the most interesting context lesson in the codebase:
+
 ```go
-func (s *UserService) Update(ctx context.Context, callerID, id int, in model.UserInput) (model.User, error) {
-	if callerID != id {
-		return model.User{}, model.ErrForbidden
-	}
-	// ...
-}
+go s.deliver(context.WithoutCancel(ctx), userID, event)
 ```
-This one *can't* live in the `WHERE` clause the way task ownership does, because the rule isn't "which rows can you see" but "which row may you write". So it's an explicit check — and it sits in the service, where a future CLI or admin job gets it for free, rather than in the handler.
 
-### `service/task.go`
-**What:** `TaskService` wraps the repository. Every method takes the caller's `userID` and passes it down. `Create`/`Update` call `Validate()` before touching SQL; the rest pass through.
+`context.WithoutCancel` keeps the values on `ctx` but drops its cancellation.
+Passing the request context straight through looks natural and is **wrong**: the
+router cancels it after 5s, and instantly if the caller hangs up, which cancelled
+real deliveries to a slow endpoint. **Whichever deadline is shortest wins**, and
+the request's 5s beat the client's 10s. The goroutine then means creating a task
+returns immediately instead of waiting on somebody else's server.
 
-**Why it matters:** This is the layer that answers "what are the rules?", separate from "how do we speak HTTP?" (handler) and "how do we store it?" (repository). Validation lives here rather than in the handler so **no caller can skip it** — add a CLI or a background job tomorrow and the rules still run.
+Errors are logged, not returned: a broken subscriber must not fail the request
+that triggered it.
 
-Right now `List`/`Get`/`Delete` are one-line pass-throughs, which looks like pure ceremony. That's honest: in a project this small the service earns its keep only in `Create`/`Update`. It's the seam where the next rule lands (ownership checks, quotas, publishing an event) without handlers or SQL noticing.
+### `service/notification_service.go`
+Writes a row per admin on submission, and one to the owner on a verdict. Errors
+are logged rather than returned for the same reason.
 
-**Without it:** Validation would live in handlers, and every new entry point would have to remember to repeat it.
+> **Known gap:** the status change and the notification rows are separate
+> statements, so a crash between them loses the alert. A real system writes both
+> in one transaction.
 
 ---
 
-## `internal/handler` — the HTTP layer
+## `internal/handler` — HTTP in
 
-### `handler/task.go` — router + handlers
-**What:** `Handler` holds the service. `Router()` builds the chi router with `middleware.Logger` and `middleware.Recoverer` and registers six routes. Each handler method decodes, calls the service, and maps the result to a status code.
+### `handler/auth_middleware.go`
+**What:** `Auth`, `RequireUser`, `RequireAdmin`, `userFrom`.
 
-**Why it matters:** This is the **HTTP boundary** and the only place that knows what a status code is. Every handler has the signature `func(w http.ResponseWriter, r *http.Request)` — the one contract for all Go HTTP handlers.
+**Why it matters:** Middleware in Go is one signature — **a function taking an
+`http.Handler` and returning an `http.Handler`**. No framework, no annotations.
+chi's own `Logger` and `Recoverer` are the same shape.
 
-Each handler owns a `Router()` returning its own sub-router with **relative** paths, and every route needs a token:
+Three details:
+
+- **`r.WithContext` returns a copy.** A `*http.Request` is not meant to be
+  mutated, so you attach the value to a new context, build a new request, and
+  pass *that* down.
+- **The context key is an unexported `type ctxKey struct{}`.** If the key were
+  the string `"user"`, any library storing `"user"` would collide with you. An
+  unexported type cannot be constructed elsewhere, so collision is impossible by
+  construction rather than by convention.
+- **`userFrom` panics** when the user is missing. That can only happen if a
+  route was mounted without `RequireUser` — a wiring bug, not a bad request. A
+  loud panic beats a silent zero-value `User{ID: 0}` querying nobody's tasks.
+  `middleware.Recoverer` turns it into a 500.
+
+**Authentication and authorization are separate middlewares** because most
+routes need the first and only `/api/admin` needs both.
+
+### `handler/task_handler.go`, `user_handler.go`, `admin_handler.go`, `webhook_handler.go`, `notification_handler.go`
+Each owns a router with **relative** paths. Three notable shapes:
+
+- **`admin_handler`** stacks the guards on the whole sub-router:
+  ```go
+  r.Use(h.auth.RequireUser)   // who are you?
+  r.Use(h.auth.RequireAdmin)  // may you be here?
+  ```
+  so you cannot add an admin endpoint and forget the check.
+- **`user_handler`** uses `r.Group` to protect everything *except* signup —
+  you have no token until you have an account. `Group` is `Route`'s sibling:
+  same middleware scoping, no URL prefix.
+- `/users/me` and `/users/{id}` coexist because chi ranks **static segments
+  above parameters**.
+
+Handlers hold the **concrete** `*service.TaskService`, not an interface. There
+is one implementation and nothing fakes it, so an interface there would be
+ceremony. Contrast `Auth`, which takes a one-method `Authenticator` because the
+middleware needs 1 of the user service's 5 methods — that narrowing is a real
+abstraction. **The rule: interface at the edge you don't own (the database),
+concrete for your own single-implementation code.**
+
+### `handler/request.go`
+**What:** `decodeJSON[T]` and `parseID`.
+
+`decodeJSON` is **generic**, so one function serves every input type:
 ```go
-func (h *TaskHandler) Router() http.Handler {
-	r := chi.NewRouter()
-	r.Use(h.auth.RequireUser)   // all task routes
-	r.Get("/", h.list)
-	r.Get("/{id}", h.get)
-	// ...
-}
+decodeJSON[model.TaskInput](w, r)
+decodeJSON[model.UserInput](w, r)
 ```
-Each handler is three steps: pull the user from the context, call the service, hand any error to `respondError`.
+Before generics this would have been near-identical copies, or a `func(dst any)`
+that traded away compile-time type safety.
 
-### `handler/user.go` — the users router
-**What:** `UserHandler` and its `/users` sub-router.
-
-**Why it matters:** It has a wrinkle tasks don't: **signup can't require a token**, because you have no token until you've signed up. So the middleware covers a subset:
-```go
-r.Post("/", h.create)          // public signup
-
-r.Group(func(r chi.Router) {
-	r.Use(h.auth.RequireUser)
-	r.Get("/", h.list)
-	r.Get("/me", h.me)
-	r.Get("/{id}", h.get)
-	// ...
-})
-```
-`Group` is `Route`'s sibling: same middleware scoping, no URL prefix. It exists exactly for "these routes, but not those."
-
-`/me` and `/{id}` coexist because chi ranks **static segments above parameters** — `/me` matches the literal route, not `id="me"` (which would 400 anyway).
-
-### `handler/middleware.go` — the token gate
-**What:** `Auth` owns `RequireUser`, which reads the `Authorization: Bearer <token>` header, loads the user, and stores it in the request context. `userFrom` reads it back.
-
-`Auth` is its own type rather than a method on a handler because both routers need it. One `Auth` gets constructed in `main.go` and handed to each handler — the alternative was every handler carrying a `*service.UserService` just to authenticate.
-
-**Why it matters:** Middleware is just a function that takes a handler and returns a handler, so it can run code before and after the next one in the chain:
-```go
-func (a *Auth) RequireUser(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// ... before
-		next.ServeHTTP(w, r.WithContext(ctx))
-		// ... after (we don't need any)
-	})
-}
-```
-That's the entire concept. No framework, no annotations, no filter registry — a function wrapping a function.
-
-Three details that matter:
-- **`r.WithContext` returns a copy.** A `*http.Request` is not meant to be mutated in place, so you attach the value to a new context, build a new request from it, and pass *that* one down.
-- **The context key is an unexported type**, `type ctxKey struct{}`. If the key were the string `"user"`, any library in your process storing `"user"` would collide with you. An unexported type from your package cannot be constructed elsewhere, so collision is impossible by construction.
-- **`userFrom` panics** if the user is missing. That looks reckless, but a missing user can only mean a route was mounted without `RequireUser` — a programmer error, not a bad request. Panicking makes the bug loud and immediate. `middleware.Recoverer` catches it and returns a 500 instead of killing the server.
-
-### `handler/errors.go` — the "exception handler"
-**What:** `respondError`: one `switch` mapping domain errors to status codes.
-
-**Why it matters:** Go has no exceptions, so this is **not** a catch block. Errors arrive here as ordinary return values the handlers passed along by hand. But it plays the role you'd want a catch block for: one place that decides what the outside world sees.
-- `ErrInvalid` → 400, real message (the client can fix it)
-- `ErrUnauthorized` → 401 (who are you?)
-- `ErrForbidden` → 403 (I know who you are; no)
-- `ErrNotFound` → 404
-- `ErrConflict` → 409 (email taken)
-- anything else → **log the detail, return a generic 500**
-
-Adding users cost this file five lines and touched nothing else. That's the payoff for centralizing it: eleven handlers, one status-code policy.
-
-That last line is the important one. An unrecognized error is *our* bug, and its text may contain SQL, table names, or connection strings. The client gets `internal error`; the log gets everything.
-
-> **Why this exists now but didn't before:** with one error type and one resource, an inline `if errors.Is(...)` per handler was clearer than a helper. At three sentinels across six handlers it was the same eight lines copy-pasted, and any new error type meant editing all six. That's when a central mapper starts paying for itself. Reach for the abstraction when the repetition shows up, not before.
-
-**Panics are the other half.** `middleware.Recoverer` catches a panic anywhere below it, logs the stack, and returns 500 — so one bad request can't take the whole server down. Note that `panic`/`recover` is **not** Go's exception system: it's for programmer errors (nil map write, impossible state), not for control flow. Expected failures are values you return.
-
-**Without it:** No routes; the service would have no way to be reached over HTTP.
-
-### `handler/http.go` — request plumbing
-**What:** `Health`, `decodeJSON`, `parseID`, `writeJSON`, and the 1 MiB body cap.
-
-`decodeJSON` is **generic** — one function serving every input type:
-```go
-func decodeJSON[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
-	var v T
-	// ... same checks for every T
-}
-```
-Called as `decodeJSON[model.TaskInput](w, r)` or `decodeJSON[model.UserInput](w, r)`. Before generics (Go 1.18) this would have been two near-identical copies, or a `func(dst any)` that traded away compile-time type safety. `[T any]` says "works for any type, and the caller still gets that exact type back" — the returned value is a real `model.UserInput`, not an `any` needing a cast.
-
-**Why it matters:** This is **HTTP-shape validation**, which is a different job from field rules:
+It does **HTTP-shape** validation, a different job from field rules:
 
 | Check | Failure | Why |
 |---|---|---|
-| `Content-Type: application/json` | **415** | Wrong media type is a protocol error, not a field error |
-| `http.MaxBytesReader` (1 MiB) | **400** | An unbounded body is a memory-exhaustion vector: without the cap, `Decode` will read a 10 GB upload straight into memory |
-| `dec.DisallowUnknownFields()` | **400** | `{"titel":"x"}` is a client bug; silently ignoring it means a task saves with an empty title and nobody learns why |
-| JSON parses at all | **400** | Malformed syntax |
-| id is a positive integer | **400** | `/api/tasks/abc` and `/api/tasks/0` can never match a row |
+| `Content-Type: application/json` | 415 | wrong media type is a protocol error |
+| `http.MaxBytesReader` (1 MiB) | 400 | without it `Decode` reads a 10 GB upload into memory |
+| `DisallowUnknownFields()` | 400 | `{"titel":"x"}` is a client bug; ignoring it saves an empty title and nobody learns why |
+| JSON parses | 400 | malformed syntax |
+| id is a positive integer | 400 | `/tasks/abc` and `/tasks/0` can never match a row |
 
-Field rules (`title` required, length ≤ 200) deliberately live in `model`, called by `service`. The rule of thumb: **shape here, meaning there.**
-
-**Without it:** Handlers would repeat the same decode-and-check boilerplate six times, and the API would accept junk it should reject.
+Field rules live in `model`, run by `service`. **Shape here, meaning there.**
 
 ---
 
-## Go module files
+## `internal/response` — JSON out
 
-### `go.mod` — the module manifest
-**What:** Names the module (`task_crud_api`), pins the Go version, lists direct dependencies (`chi/v5`, `lib/pq`, `godotenv`).
+**What:** `JSON`, `Error`, `ErrorFrom`, and the `ResponseError` body.
 
-**Why it matters:** Go's `package.json` / `pom.xml`. It makes the folder a *module* and resolves import paths — including your own (`task_crud_api/internal/model`). You rarely edit it by hand; `go get` and `go mod tidy` maintain it.
+**Why it matters:** `ErrorFrom` is the one place that turns a domain error into
+a status code. Go has no exceptions, so this is **not** a catch block — the
+errors arrived as ordinary return values the handlers passed along by hand. It
+is a translation table.
 
-**Without it:** `go build` fails — no module, so imports can't be resolved.
+The `default` branch is a security control: an unrecognised error is *our* bug,
+and its text may carry SQL, table names, or a connection string. The client gets
+`internal error`; the log gets everything. Never `http.Error(w, err.Error(), 500)`.
 
-### `go.sum` — the lockfile / checksums
-**What:** Cryptographic hashes for every dependency version.
-
-**Why it matters:** Security and reproducibility. Every build verifies downloads against these hashes, so a tampered dependency is rejected.
-
-**Without it:** Builds work but lose integrity verification; `go mod tidy` regenerates it. Never edit by hand.
+> **When to extract this:** with one sentinel and one resource, an inline
+> `errors.Is` per handler was clearer. At six sentinels across five handlers it
+> became the same block pasted everywhere. Extract when the repetition shows you
+> its shape, not when you first imagine it.
 
 ---
 
-## Config
+## `internal/client` — HTTP out
 
-### `.env` / `.env.example`
-**What:** `PORT` and `DATABASE_URL`. `.env` is real and **gitignored**; `.env.example` is the committable template.
+**What:** `GetJSON`, `PostJSON`, and the shared `do`.
 
-**Why it matters:** `godotenv.Load()` reads `.env` into the process environment, and it **never overwrites** a variable that's already set. That gives you a clean precedence chain: real OS env > `.env` > hardcoded default. Production sets real env vars and ships no `.env` at all.
+**Why it matters:** The mirror image of `handler`. Three things every caller
+must do and most forget:
 
-`.env` is loaded from the **current working directory**, not from next to the binary — which is why you run `go run ./cmd/api` from the project root.
+- **Close the body**, or the connection leaks and the pool starves.
+- **Cap what you read** from a server you do not control (`io.LimitReader`).
+- **Check the status yourself.** A 4xx/5xx is a *successful* HTTP exchange as
+  far as `Do` is concerned: `err` is nil. Skip the check and an outage looks
+  like success.
 
-> **`sslmode=disable` is mandatory here.** lib/pq defaults to `sslmode=require`; the local container speaks no TLS. Omit it and you get `pq: SSL is not enabled on the server`.
-
-**Without `.env`:** The app falls back to `PORT=3000` and the default URL in `db.go`.
+`New(timeout)` rather than `http.DefaultClient`, which has **no timeout at all**,
+so a server that accepts your connection and goes silent hangs you forever.
 
 ---
 
 ## Infrastructure
 
-### `docker-compose.yml` — the database, declared
-**What:** Postgres 17: image, `POSTGRES_USER/PASSWORD/DB`, host→container port mapping (**5433**→5432), a named volume `taskdata`, and a healthcheck.
+### `initdb/schema.sql`
+Runs **once**, automatically, the first time the Postgres volume initializes.
 
-**Why it matters:** Turns "install and configure Postgres" into `docker compose up -d`. The **named volume** is what makes rows survive `docker compose stop/start`. The port is 5433 because this machine already runs a native Postgres on 5432 — `localhost:5432` would silently hit the *wrong server* and fail auth.
+The constraints are the interesting part. `CHECK (role IN ('admin','member'))`
+and the status CHECK mean the database refuses values the app does not know:
+Go validation protects the API, a CHECK protects the data from *any* client,
+including a stray `psql` session.
 
-**Without it:** Install and run Postgres by hand, and keep its config in sync yourself.
+`tasks_review_consistent` goes further and encodes the state machine as a
+constraint, so a `pending` task cannot carry a reviewer even if the code has a
+bug.
 
-### `initdb/schema.sql` — first-boot schema + seed
-**What:** Creates `users` and `tasks`, links them, indexes the link, and seeds two users with two demo tokens plus three tasks.
+Two foreign keys to `users`, two **different** delete rules, and the difference
+matters:
 
-**Why it matters:** Any `.sql`/`.sh` mounted into `/docker-entrypoint-initdb.d` runs **once**, automatically, the first time the volume initializes. A fresh `docker compose up` gives you ready tables with no manual `psql`. `SERIAL` is why the database owns id generation; `now()` is why it owns the timestamp.
+| Column | On user delete | Why |
+|---|---|---|
+| `tasks.user_id` | CASCADE | the task belongs to its owner; without them it is meaningless |
+| `tasks.reviewed_by` | SET NULL | the task belongs to the *member*, not the reviewer — deleting an admin must not destroy work they approved |
 
-The `tasks.user_id` line does a lot of work in one clause:
-```sql
-user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE
-```
-- `REFERENCES` is the **foreign key**: Postgres now refuses to store a task whose `user_id` doesn't exist. Your data cannot drift into an orphaned state, no matter what the Go code does.
-- `NOT NULL` means every task has an owner. No "somebody's" tasks.
-- `ON DELETE CASCADE` means deleting a user deletes their tasks automatically. Without it, the delete would fail with a foreign-key violation.
+> **Gotcha:** initdb scripts run only on an **empty** volume. Change this file
+> and you must `docker compose down -v` (which deletes all data) for it to
+> re-run. That pain is exactly what migration tools exist for.
 
-`tasks_user_id_idx` exists because *every* task query now filters on `user_id`. An index on a column you filter by on every request is not premature; it's the whole point of indexes.
+See [docs/ERD.md](docs/ERD.md) for the full diagram, generated from the live
+database rather than from this file.
 
-**Without it:** The container starts empty and the app's first query fails: `relation "tasks" does not exist`.
+### `docker-compose.yml`
+Postgres 17, a named volume so rows survive `stop`/`start`, and a healthcheck.
+Published on **5433**, not 5432, because this machine already runs a native
+Postgres — `localhost:5432` would silently hit the wrong server and fail auth.
 
-> **Gotcha:** initdb scripts run *only* on an empty volume. Change this file and you must `docker compose down -v` (wipe the volume) for it to re-run.
+### `.env` / `.env.example`
+`godotenv.Load()` reads `.env` into the environment and **never overwrites** a
+variable that is already set, giving a clean precedence chain: real env >
+`.env` > hardcoded default. `.env` is gitignored; `.env.example` is the template.
+
+`.env` is read from the **current working directory**, which is why you run
+`go run ./cmd/api` from the project root.
+
+> **`sslmode=disable` is mandatory.** lib/pq defaults to `sslmode=require` where
+> pgx defaulted to `prefer`. Omit it and you get `pq: SSL is not enabled on the
+> server`.
 
 ---
 
-## Tooling & docs
+## `frontend/` — the UI
 
-### `insomnia-collection.json`
-**What:** An Insomnia v4 export with every endpoint plus the 404/400/415 cases.
+React + Vite + TypeScript. `npm install && npm run dev`, with the API running.
 
-**Why it matters:** Faster, repeatable testing than typing `curl` each time. Not required to run the app.
+- **`src/api/types.ts`** mirrors `internal/model` field for field. The Go json
+  tags decide these names, which is why stripping a tag breaks the UI.
+  `TaskStatus` is a union of the same four string literals as the Go named type,
+  so both compilers reject anything else.
+- **`src/api/client.ts`** mirrors `internal/client`, with the same trap
+  inverted: **`fetch` only rejects on a network failure**. A 404 or 500 resolves
+  normally with `ok === false`, so you must check it yourself — exactly like
+  `http.Client.Do` returning `err == nil` for a 500.
+- **`vite.config.ts`** proxies `/api` to `:8090`. A browser on `:5173` calling
+  `:8090` is cross-origin and the Go API sends no CORS headers, so the browser
+  would block it. The proxy makes the API look same-origin and leaves the
+  backend untouched. Deploy the frontend separately and you *will* need CORS.
 
-### `README.md` — how to run it
-### `LEARN.md` — this file
-README says *how to run*; LEARN says *why each piece exists*.
+The Review tab is hidden for members, but that is **convenience, not security**.
+`RequireAdmin` still answers 403 to a member calling `/api/admin/tasks`
+directly. "Hide the button" is the most common way people think they have
+implemented authorization.
 
 ---
 
-## The request lifecycle (how the layers cooperate)
+## The request lifecycle
 
-A single `POST /api/tasks` with `{"title":"  buy milk  "}` and Alice's token:
+`POST /api/tasks` with `{"title":"  buy milk  "}` and Bob's token:
 
 ```
 HTTP request
-  → cmd/api/main.go        root router: Logger, Recoverer, then Mount picks /api/tasks
-  → handler/middleware.go  RequireUser reads "Bearer alice-token-123"
-  → service/user.go        → repository/user.go: SELECT ... WHERE api_token = $1
-  ←                        Alice loaded, stored in the request context
-  → handler/http.go        Content-Type ok? under 1 MiB? JSON parses? no stray fields?
-  → handler/task.go        route "/" matched, decoded, userFrom(ctx) gives Alice
-  → service/task.go        Validate() trims to "buy milk", rules pass
-  → repository/task.go     INSERT INTO tasks (user_id, title) VALUES ($1, $2) RETURNING ...
-  → repository/db.go       a pooled connection carries it to Postgres
-  → docker-compose         the container assigns id + created_at
-  ← repository/task.go     scans the returned row into a model.Task
-  ← service/task.go        passes it back untouched
-  ← handler/task.go        writeJSON encodes it, 201 Created
-HTTP response
+  → server.go            Logger, Recoverer, Timeout(5s), Mount picks /api/tasks
+  → auth_middleware.go   RequireUser reads "Bearer bob-token-456"
+  → service/user         → repository/user: SELECT ... WHERE api_token = $1
+  ←                      Bob loaded, stored on the request context
+  → handler/request.go   Content-Type? under 1 MiB? parses? no stray fields?
+  → task_handler.go      route "/" matched, decoded, userFrom(ctx) gives Bob
+  → service/task         Validate() trims to "buy milk", rules pass
+  → repository/task      INSERT ... RETURNING  ($1, $2 placeholders)
+  → repository/db        a pooled connection carries it to Postgres
+  ← task_handler.go      response.JSON encodes it, 201 Created
+  ⋮ (separately, in a goroutine on a detached context)
+  → webhook_service      POSTs the task.created event to Bob's webhooks
 ```
 
-Five ways a request can stop early, each at the cheapest possible point:
+## Where each rule is enforced
 
 | Request | Stops at | Result |
 |---|---|---|
 | No token | `RequireUser` | 401, never reaches a handler |
-| `{"titel":"x"}` | `handler/http.go` | 400, never reaches the service |
-| `{"title":""}` | `service` | 400 `invalid input: title is required`, never reaches SQL |
-| Bob asks for Alice's task 1 | `repository` (WHERE) | zero rows → `ErrNotFound` → 404, existence not confirmed |
+| Member hits `/api/admin/*` | `RequireAdmin` | 403 |
+| `{"titel":"x"}` | `handler/request.go` | 400, never reaches the service |
+| `{"title":""}` | `service` | 400, never reaches SQL |
+| Bob reads Alice's task | `repository` (WHERE) | 404, existence not confirmed |
 | Alice edits Bob's user | `service` (callerID != id) | 403, never reaches SQL |
+| Approving a `pending` task | `service` (state machine) | 409 |
+| Duplicate email | **Postgres** (UNIQUE) | 409, race-free |
+| `pending` task with a reviewer | **Postgres** (CHECK) | rejected even from raw SQL |
 
-Every layer has exactly one job. That separation is the whole point: change how data is stored (`repository`) without touching how it's served (`handler`), and vice versa.
+The bottom two are the point: the further down a rule is enforced, the fewer
+ways there are to get around it.
