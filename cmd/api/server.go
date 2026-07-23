@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"task_crud_api/internal/auth"
 	"task_crud_api/internal/client"
 	"task_crud_api/internal/handler"
 	"task_crud_api/internal/repository"
@@ -28,19 +29,24 @@ func NewServer(cfg Config) *Server {
 	api := client.New(10 * time.Second)
 
 	userRepo := repository.NewUserRepo(db)
+	refreshRepo := repository.NewRefreshTokenRepo(db)
+
+	tokens := auth.NewTokenService(cfg.JWTSecret, cfg.AccessTTL, cfg.RefreshTTL)
 
 	hooks := service.NewWebhookService(repository.NewWebhookRepo(db), api)
 	notes := service.NewNotificationService(repository.NewNotificationRepo(db), userRepo)
 
 	tasks := service.NewTaskService(repository.NewTaskRepo(db), hooks, api, notes)
 	users := service.NewUserService(userRepo)
+	authService := service.NewAuthService(userRepo, refreshRepo, tokens)
 
-	auth := handler.NewAuth(users)
-	taskHandler := handler.NewTaskHandler(tasks, auth)
-	userHandler := handler.NewUserHandler(users, auth)
-	webhookHandler := handler.NewWebhookHandler(hooks, auth)
-	adminHandler := handler.NewAdminHandler(tasks, auth)
-	noteHandler := handler.NewNotificationHandler(notes, auth)
+	guard := handler.NewAuth(tokens)
+	authHandler := handler.NewAuthHandler(authService)
+	taskHandler := handler.NewTaskHandler(tasks, guard)
+	userHandler := handler.NewUserHandler(users, guard)
+	webhookHandler := handler.NewWebhookHandler(hooks, guard)
+	adminHandler := handler.NewAdminHandler(tasks, guard)
+	noteHandler := handler.NewNotificationHandler(notes, guard)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -49,6 +55,7 @@ func NewServer(cfg Config) *Server {
 	r.Use(middleware.Timeout(5 * time.Second))
 
 	r.Get("/health", handler.Health)
+	r.Mount("/api/auth", authHandler.Router())
 	r.Mount("/api/tasks", taskHandler.Router())
 	r.Mount("/api/users", userHandler.Router())
 	r.Mount("/api/webhooks", webhookHandler.Router())

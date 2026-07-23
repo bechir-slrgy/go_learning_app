@@ -1,16 +1,38 @@
 package main
 
-import "os"
+import (
+	"log"
+	"os"
+	"time"
+)
 
 type Config struct {
 	Port        string
 	DatabaseURL string
+	JWTSecret   string
+	AccessTTL   time.Duration
+	RefreshTTL  time.Duration
 }
 
+// devJWTSecret is used only when JWT_SECRET is unset, so the seeded demo flow
+// works out of the box. Running with it logs a loud warning: a production
+// deployment MUST set its own secret, or every token it issues is forgeable by
+// anyone who has read this source.
+const devJWTSecret = "dev-only-insecure-secret-change-me"
+
 func LoadConfig() Config {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		log.Println("WARNING: JWT_SECRET is not set, using the insecure dev default. Set JWT_SECRET in production.")
+		secret = devJWTSecret
+	}
+
 	return Config{
 		Port:        envOr("PORT", "3000"),
 		DatabaseURL: envOr("DATABASE_URL", "postgres://taskuser:taskpass@localhost:5433/tasks?sslmode=disable"),
+		JWTSecret:   secret,
+		AccessTTL:   15 * time.Minute,
+		RefreshTTL:  7 * 24 * time.Hour,
 	}
 }
 
