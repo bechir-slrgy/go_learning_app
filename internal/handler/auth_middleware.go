@@ -9,9 +9,6 @@ import (
 	"task_crud_api/internal/response"
 )
 
-// TokenVerifier is all the middleware needs: turn a raw JWT into the user it
-// stands for. The concrete *auth.TokenService satisfies it. Verification is
-// pure signature + expiry maths, so there is no database call per request.
 type TokenVerifier interface {
 	ParseAccess(raw string) (model.User, error)
 }
@@ -28,8 +25,6 @@ func NewAuth(tokens TokenVerifier) *Auth {
 	return &Auth{tokens: tokens}
 }
 
-// RequireUser is the authentication gate. It reads the bearer JWT, verifies it,
-// and puts the user (built from the token's claims) on the request context.
 func (a *Auth) RequireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw := bearerToken(r)

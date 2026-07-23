@@ -18,8 +18,6 @@ func NewAuthHandler(auth *service.AuthService) *AuthHandler {
 	return &AuthHandler{auth: auth}
 }
 
-// Router returns the /auth sub-router. All three routes are public: you cannot
-// require a token to obtain a token.
 func (h *AuthHandler) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Post("/login", h.login)

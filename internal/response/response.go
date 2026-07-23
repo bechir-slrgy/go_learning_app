@@ -24,9 +24,7 @@ func Error(w http.ResponseWriter, status int, message string) {
 	JSON(w, status, ResponseError{Status: status, Message: message})
 }
 
-// Unauthorized is a 401 with the WWW-Authenticate header the HTTP spec requires
-// for that status. It tells a client the resource is protected by a bearer
-// token, which is the correct machine-readable "you need to log in" signal.
+
 func Unauthorized(w http.ResponseWriter, message string) {
 	w.Header().Set("WWW-Authenticate", `Bearer realm="api"`)
 	Error(w, http.StatusUnauthorized, message)

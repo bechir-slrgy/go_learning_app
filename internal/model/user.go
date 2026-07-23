@@ -32,10 +32,6 @@ type UserInput struct {
 	Password string `json:"password"`
 }
 
-// ValidateProfile checks the fields an update may change. Signup also needs a
-// password, which is why Validate wraps this and adds the password rule: an
-// update reuses the profile checks without demanding a password it does not
-// carry.
 func (in *UserInput) ValidateProfile() error {
 	in.Email = strings.TrimSpace(in.Email)
 	in.Name = strings.TrimSpace(in.Name)
