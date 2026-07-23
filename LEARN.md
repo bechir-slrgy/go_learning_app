@@ -17,9 +17,10 @@ task_crud_api/
 │   └── echo/main.go              dev-only webhook receiver
 ├── internal/                     importable only by this module
 │   ├── model/                    the domain: types, rules, sentinel errors
+│   ├── auth/                     JWT issue/verify, refresh-token hashing
 │   ├── repository/               the only code that writes SQL
-│   ├── service/                  business rules
-│   ├── handler/                  HTTP in
+│   ├── service/                  business rules (incl. login/refresh/logout)
+│   ├── handler/                  HTTP in (incl. auth middleware + /auth routes)
 │   ├── client/                   HTTP out
 │   └── response/                 JSON out, error -> status code
 ├── frontend/                     React + Vite + TypeScript UI
@@ -148,26 +149,25 @@ until someone reviews the task. A `*int` marshals to JSON `null` where a plain
 `int` would silently claim the reviewer was user 0.
 
 ### `model/user.go`
-**What:** `Role`, `User`, `UserWithToken`, `UserInput` + `Validate`.
+**What:** `Role`, `User`, `UserInput`, `LoginInput`, `RefreshInput`,
+`TokenPair`, and validation.
 
 **Why it matters:** Look at what is **missing** from `User`: there is no
-`APIToken` field. The token is only ever a `WHERE` argument and never a selected
-column, so it cannot leak into a response. The safest way to not leak a secret
-is to never load it.
+`PasswordHash` field. The hash is only ever a `WHERE` argument or a second
+return value from the repository, never a column on the struct, so it cannot
+leak into a response. The safest way to not leak a secret is to never load it
+onto a serializable type.
 
-`UserWithToken` is the one exception, returned only by signup:
-```go
-type UserWithToken struct {
-	User
-	Token string `json:"token"`
-}
-```
-That is **struct embedding**: `User` is declared with no field name, so its
-fields are promoted and the JSON comes out flat with one extra key rather than
-nested. Go's composition answer to inheritance.
+`UserInput.Validate` splits into `ValidateProfile` (email + name, shared with
+update) and the full `Validate` (adds the password rule), so an update reuses
+the profile checks without demanding a password it does not carry. The password
+is **not trimmed** — leading and trailing spaces are legitimate password
+characters — and is capped at 72 bytes, which is bcrypt's own limit.
 
-`Validate` uses `net/mail.ParseAddress` rather than a regex, because email
-syntax is a genuinely gnarly spec the standard library already implements.
+`LoginInput` is deliberately **not** length-validated: telling an attacker "that
+is too short to be our password" leaks the rule. A wrong login is always a plain
+401. `Validate` uses `net/mail.ParseAddress` rather than a regex, because email
+syntax is a gnarly spec the standard library already implements.
 
 ### `model/errors.go`
 **What:** Six sentinels: `ErrNotFound`, `ErrInvalid`, `ErrUnauthorized`,
@@ -247,9 +247,11 @@ Note `RowsAffected()` returns `(int64, error)` in `database/sql`, unlike pgx's
 single value.
 
 ### `repository/user_repository.go`
-`ByToken` is the entire authentication check, one query. `sql.ErrNoRows` becomes
-`ErrUnauthorized` rather than `ErrNotFound`, because "your token is bad" is a
-401.
+`ByEmailWithHash` is the login lookup. It returns the bcrypt hash as a **second
+value**, never a field on `model.User`, so the hash cannot leak into a JSON
+response by accident. Not-found returns `ErrUnauthorized`, not `ErrNotFound`,
+because "no such email" and "wrong password" must look identical to the caller
+or you leak which emails are registered.
 
 `Create`/`Update` translate a second failure:
 ```go
@@ -298,21 +300,38 @@ An imported todo the source calls "completed" enters the **review queue**, not
 `approved`. Importing must not be a way to approve your own work.
 
 ### `service/user_service.go`
-Signup mints the token:
+`Create` (signup) hashes the password with **bcrypt** and stores the hash, never
+the password:
 ```go
-b := make([]byte, 24)
-rand.Read(b)          // crypto/rand
-hex.EncodeToString(b)
+hash, _ := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
 ```
-**`crypto/rand`, never `math/rand`.** `math/rand` is a deterministic sequence
-from a seed: fast, repeatable, and predictable to anyone who can guess it. A
-predictable token is not a token. The two packages have nearly identical APIs,
-which is exactly why this mistake is common.
+bcrypt salts internally and is deliberately slow, so a leaked hash resists brute
+force. It returns the plain `User`, with no token — the client logs in
+afterwards.
 
 `Update`/`Delete` enforce "you may only edit yourself" by comparing the caller's
 id (from the token) with the id in the URL. That rule *cannot* live in a `WHERE`
 clause the way task ownership does, because the question is not "which rows can
 you see" but "which row may you write".
+
+### `service/auth_service.go`
+**What:** `Login`, `Refresh`, `Logout` — the credential-to-token flow.
+
+- **`Login`** loads the user by email, compares the password with
+  `bcrypt.CompareHashAndPassword`, and issues a token pair. A wrong email and a
+  wrong password return the **same** `ErrUnauthorized`, so you cannot probe which
+  emails are registered.
+- **`Refresh`** rotates: it hashes the incoming refresh token, looks it up,
+  **spends it (deletes the row) first**, then issues a new pair. Rotation means a
+  stolen refresh token works at most once before the legitimate client's next
+  refresh invalidates it.
+- **`Logout`** deletes the refresh-token row. It is deliberately quiet — an
+  unknown token is not an error, because logging out something already gone is a
+  success.
+
+An access token cannot be revoked (it is stateless and short-lived); a refresh
+token can, by deleting its row. That is the whole reason refresh tokens are
+stored and access tokens are not.
 
 ### `service/webhook_service.go`
 Delivery, and the most interesting context lesson in the codebase:
@@ -341,6 +360,34 @@ are logged rather than returned for the same reason.
 
 ---
 
+## `internal/auth` — the JWT machinery
+
+### `auth/token.go`
+**What:** `TokenService` — issues and verifies JWT access tokens, and mints and
+hashes refresh tokens. Holds the signing secret and the two lifetimes.
+
+**Why it matters:** This is the crypto seam, kept out of the handler and service
+layers so they depend on behaviour, not on `golang-jwt`.
+
+- **`IssueAccess`** signs an `HS256` token whose claims carry `sub` (user id),
+  `role`, and `name`, plus `exp`/`iat`/`iss`. Nothing secret goes in: a JWT is
+  **signed, not encrypted**, so anyone can base64-decode and read it. The
+  signature only proves it was not tampered with.
+- **`ParseAccess`** verifies signature + expiry and rebuilds the user from the
+  claims alone — **no database call**. The keyfunc **pins the algorithm** to
+  HS256:
+  ```go
+  if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok { ... reject }
+  ```
+  Without this an attacker sends `alg=none` (no signature) or passes an RSA
+  public key as the HMAC secret, and forges any claims. This one check is the
+  single most important line for JWT safety.
+- **Refresh tokens** are 32 random bytes, hex-encoded. Only their **SHA-256
+  hash** is stored, so a database leak hands over nothing usable. SHA-256, not
+  bcrypt: the token already has 256 bits of entropy, so it needs no slow hash to
+  resist guessing, and lookups must be fast. bcrypt is for **low-entropy**
+  secrets — passwords — where slowness is the defense.
+
 ## `internal/handler` — HTTP in
 
 ### `handler/auth_middleware.go`
@@ -349,6 +396,12 @@ are logged rather than returned for the same reason.
 **Why it matters:** Middleware in Go is one signature — **a function taking an
 `http.Handler` and returning an `http.Handler`**. No framework, no annotations.
 chi's own `Logger` and `Recoverer` are the same shape.
+
+`RequireUser` reads the bearer JWT and calls `tokens.ParseAccess`. Because the
+user's id, role, and name live in the verified token, **authentication is one
+signature check and authorization is one field read — zero queries per
+request.** That statelessness is the whole point of JWT; the cost is that a role
+change or ban only takes effect when the 15-minute access token expires.
 
 Three details:
 
@@ -384,10 +437,17 @@ Each owns a router with **relative** paths. Three notable shapes:
 
 Handlers hold the **concrete** `*service.TaskService`, not an interface. There
 is one implementation and nothing fakes it, so an interface there would be
-ceremony. Contrast `Auth`, which takes a one-method `Authenticator` because the
-middleware needs 1 of the user service's 5 methods — that narrowing is a real
-abstraction. **The rule: interface at the edge you don't own (the database),
-concrete for your own single-implementation code.**
+ceremony. Contrast `Auth`, which takes a one-method `TokenVerifier` because the
+middleware needs only `ParseAccess` — that narrowing is a real abstraction.
+**The rule: interface at the edge you don't own (the database, the token
+signer), concrete for your own single-implementation code.**
+
+### `handler/auth_handler.go`
+**What:** The public `/api/auth` router: `login`, `refresh`, `logout`.
+
+**Why it matters:** All three are public — **you cannot require a token to
+obtain a token.** Each decodes a body, calls the auth service, and returns the
+token pair (or 204 for logout). No middleware, no `userFrom`.
 
 ### `handler/request.go`
 **What:** `decodeJSON[T]` and `parseID`.
@@ -511,7 +571,10 @@ React + Vite + TypeScript. `npm install && npm run dev`, with the API running.
 - **`src/api/client.ts`** mirrors `internal/client`, with the same trap
   inverted: **`fetch` only rejects on a network failure**. A 404 or 500 resolves
   normally with `ok === false`, so you must check it yourself — exactly like
-  `http.Client.Do` returning `err == nil` for a 500.
+  `http.Client.Do` returning `err == nil` for a 500. It also does **silent
+  refresh**: on a 401 it spends the stored refresh token for a new access token
+  and replays the request once, which is why a 15-minute access token is
+  invisible to the user.
 - **`vite.config.ts`** proxies `/api` to `:8090`. A browser on `:5173` calling
   `:8090` is cross-origin and the Go API sends no CORS headers, so the browser
   would block it. The proxy makes the API look same-origin and leaves the
@@ -526,14 +589,14 @@ implemented authorization.
 
 ## The request lifecycle
 
-`POST /api/tasks` with `{"title":"  buy milk  "}` and Bob's token:
+`POST /api/tasks` with `{"title":"  buy milk  "}` and Bob's JWT:
 
 ```
 HTTP request
   → server.go            Logger, Recoverer, Timeout(5s), Mount picks /api/tasks
-  → auth_middleware.go   RequireUser reads "Bearer bob-token-456"
-  → service/user         → repository/user: SELECT ... WHERE api_token = $1
-  ←                      Bob loaded, stored on the request context
+  → auth_middleware.go   RequireUser verifies the JWT signature + expiry
+  → auth/token.go        ParseAccess: claims -> User{id, role, name}, NO db query
+  ←                      Bob (from the token) stored on the request context
   → handler/request.go   Content-Type? under 1 MiB? parses? no stray fields?
   → task_handler.go      route "/" matched, decoded, userFrom(ctx) gives Bob
   → service/task         Validate() trims to "buy milk", rules pass
@@ -548,7 +611,8 @@ HTTP request
 
 | Request | Stops at | Result |
 |---|---|---|
-| No token | `RequireUser` | 401, never reaches a handler |
+| Missing/expired/forged JWT | `RequireUser` | 401 + `WWW-Authenticate`, never reaches a handler |
+| Wrong login credentials | `service/auth` | 401, same for bad email or bad password |
 | Member hits `/api/admin/*` | `RequireAdmin` | 403 |
 | `{"titel":"x"}` | `handler/request.go` | 400, never reaches the service |
 | `{"title":""}` | `service` | 400, never reaches SQL |

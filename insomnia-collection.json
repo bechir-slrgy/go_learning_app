@@ -7,7 +7,7 @@
       "_id": "wrk_taskcrud",
       "_type": "workspace",
       "name": "task_crud_api",
-      "description": "CRUD REST API for tasks and users (Go + chi + Postgres). Every route except GET /health and POST /api/users needs 'Authorization: Bearer {{ _.token }}'. Switch between the 'Local (Alice)' and 'Local (Bob)' environments to see per-user isolation.",
+      "description": "CRUD REST API for tasks and users (Go + chi + Postgres, JWT auth). Run an 'auth' > Login request first, copy its access_token into the active environment's 'token' variable, and the protected requests send 'Authorization: Bearer {{ _.token }}'. Seeded users alice@example.com (admin) and bob@example.com (member), password 'password123'.",
       "scope": "collection"
     },
     {
@@ -17,7 +17,7 @@
       "name": "Base Environment",
       "data": {
         "base_url": "http://localhost:8090",
-        "token": "alice-token-123"
+        "token": ""
       },
       "dataPropertyOrder": {
         "&": ["base_url", "token"]
@@ -31,7 +31,7 @@
       "name": "Local (Alice, admin)",
       "data": {
         "base_url": "http://localhost:8090",
-        "token": "alice-token-123"
+        "token": ""
       },
       "dataPropertyOrder": {
         "&": ["base_url", "token"]
@@ -45,7 +45,7 @@
       "name": "Local (Bob, member)",
       "data": {
         "base_url": "http://localhost:8090",
-        "token": "bob-token-456"
+        "token": ""
       },
       "dataPropertyOrder": {
         "&": ["base_url", "token"]
@@ -64,6 +64,112 @@
       "metaSortKey": -2000
     },
     {
+      "_id": "fld_auth",
+      "_type": "request_group",
+      "parentId": "wrk_taskcrud",
+      "name": "auth",
+      "description": "Public. Log in to get a token pair, copy access_token into the environment's 'token', refresh to rotate, logout to revoke.",
+      "metaSortKey": -1500
+    },
+    {
+      "_id": "req_login_alice",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Login (Alice, admin)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/auth/login",
+      "description": "Returns {access_token, refresh_token, ...}. Copy access_token into the environment 'token' variable. Wrong email OR wrong password both return 401.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"password123\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "metaSortKey": -100
+    },
+    {
+      "_id": "req_login_bob",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Login (Bob, member)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/auth/login",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"bob@example.com\",\n  \"password\": \"password123\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "metaSortKey": -90
+    },
+    {
+      "_id": "req_login_bad",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Login wrong password (expect 401)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/auth/login",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"wrong\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "metaSortKey": -80
+    },
+    {
+      "_id": "req_refresh",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Refresh (rotate)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/auth/refresh",
+      "description": "Paste a refresh_token. Returns a NEW pair; the old refresh token is spent, so reusing it returns 401.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"refresh_token\": \"PASTE_REFRESH_TOKEN\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "metaSortKey": -70
+    },
+    {
+      "_id": "req_logout",
+      "_type": "request",
+      "parentId": "fld_auth",
+      "name": "Logout (revoke)",
+      "method": "POST",
+      "url": "{{ _.base_url }}/api/auth/logout",
+      "description": "Deletes the refresh token. 204 even if already gone.",
+      "body": {
+        "mimeType": "application/json",
+        "text": "{\n  \"refresh_token\": \"PASTE_REFRESH_TOKEN\"\n}"
+      },
+      "headers": [
+        {
+          "name": "Content-Type",
+          "value": "application/json"
+        }
+      ],
+      "metaSortKey": -60
+    },
+    {
       "_id": "fld_users",
       "_type": "request_group",
       "parentId": "wrk_taskcrud",
@@ -75,13 +181,13 @@
       "_id": "req_user_signup",
       "_type": "request",
       "parentId": "fld_users",
-      "name": "Sign up (public, returns token)",
+      "name": "Sign up (public)",
       "method": "POST",
       "url": "{{ _.base_url }}/api/users",
-      "description": "The only response that ever contains the token. Copy it into the environment's 'token' variable to act as this new user.",
+      "description": "Creates a user. Returns the user (no token). Log in afterwards via auth > Login to get a token pair.",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"email\": \"carol@example.com\",\n  \"name\": \"Carol\"\n}"
+        "text": "{\n  \"email\": \"carol@example.com\",\n  \"name\": \"Carol\",\n  \"password\": \"password123\"\n}"
       },
       "headers": [
         {
@@ -197,7 +303,7 @@
       "description": "Postgres raises unique_violation (23505) on the UNIQUE email constraint; the repository turns it into ErrConflict, which is a 409.",
       "body": {
         "mimeType": "application/json",
-        "text": "{\n  \"email\": \"alice@example.com\",\n  \"name\": \"Impostor\"\n}"
+        "text": "{\n  \"email\": \"alice@example.com\",\n  \"name\": \"Impostor\",\n  \"password\": \"password123\"\n}"
       },
       "headers": [
         {

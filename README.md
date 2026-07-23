@@ -1,8 +1,10 @@
 # task_crud_api
 
 A tiny CRUD REST API for `tasks` and `users`, built with Go + [chi](https://github.com/go-chi/chi),
-`database/sql` + [lib/pq](https://github.com/lib/pq), and PostgreSQL in Docker.
-Tasks belong to users; everything except `GET /health` and signup needs a bearer token.
+`database/sql` + [lib/pq](https://github.com/lib/pq), JWT auth
+([golang-jwt](https://github.com/golang-jwt/jwt)), and PostgreSQL in Docker.
+Tasks belong to users; everything except `GET /health`, signup, and `/api/auth/*`
+needs a JWT access token.
 
 ## Layout
 ```
@@ -11,15 +13,17 @@ cmd/
   echo/                  dev-only webhook receiver (second binary, same module)
 internal/
   model/                 Task, User, Webhook, inputs + Validate, sentinel errors
-  repository/            db.go (sql.DB + lib/pq), task_, user_, webhook_repository.go
-  service/               business rules, validation, outbound calls
+  auth/                  token.go: JWT issue/verify, refresh-token hashing
+  repository/            db.go, task_/user_/webhook_/refresh_token_repository.go
+  service/               business rules; auth_service.go = login/refresh/logout
   client/                HTTP client for calling OTHER people's APIs
   response/              JSON + ResponseError, one error → status code map
   handler/
+    auth_middleware.go   Auth.RequireUser verifies the JWT; RequireAdmin checks role
+    auth_handler.go      AuthHandler + /auth router (login, refresh, logout)
     task_handler.go      TaskHandler + its own /tasks router
     user_handler.go      UserHandler + its own /users router
     webhook_handler.go   WebhookHandler + its own /webhooks router
-    auth_middleware.go   Auth.RequireUser: token → user → request context
     health_handler.go    public health check
     request.go           decodeJSON (generic), parseID
 docs/ERD.md              database diagram + constraints, generated from the live DB
@@ -58,35 +62,63 @@ go run ./cmd/api           # run from the project root so .env is found
 
 Port comes from `PORT` in `.env` (8090 here), falling back to 3000.
 
-## Auth
-Sign up to get a token (this is the only response that ever contains it):
+## Auth (JWT)
+
+Real authentication: bcrypt passwords, a stateless JWT access token, and a
+rotating refresh token.
+
+**Log in** with email + password to get a token pair:
 ```powershell
-curl.exe -X POST http://localhost:8090/api/users -H "Content-Type: application/json" -d "{\"email\":\"carol@example.com\",\"name\":\"Carol\"}"
-# {"id":3,"email":"carol@example.com","name":"Carol","created_at":"...","token":"3d96938a1ae6..."}
+curl.exe -X POST http://localhost:8090/api/auth/login -H "Content-Type: application/json" -d "{\"email\":\"alice@example.com\",\"password\":\"password123\"}"
+# {"access_token":"eyJ...","refresh_token":"283c...","token_type":"Bearer","access_expires_in":899}
 ```
-Or use a seeded demo user:
+Seeded users (both password `password123`): **Alice** (`admin`), **Bob** (`member`).
 
-| User  | Email               | Role     | Token             |
-|-------|---------------------|----------|-------------------|
-| Alice | alice@example.com   | `admin`  | `alice-token-123` |
-| Bob   | bob@example.com     | `member` | `bob-token-456`   |
-
-Send it on every protected request:
+**Call protected routes** with the access token:
 ```
-Authorization: Bearer alice-token-123
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
 ```
-Middleware looks the token up, loads the user, and puts it in the request
-context. A missing, malformed, or unknown token is a **401**.
+`RequireUser` verifies the JWT's signature and expiry — **no database lookup**.
+The user's id, role, and name ride inside the signed token, so authorization is
+pure maths. A missing, malformed, or expired token is a **401** carrying a
+`WWW-Authenticate: Bearer` header.
 
-> Tokens are stored in **plain text**. A real API stores a hash of the token,
-> compares hashes, and can therefore never print it back. Signup tokens are
-> generated with `crypto/rand`; the two demo ones are hand-seeded.
+**Token lifetimes and the refresh flow:**
+
+| Token | Lifetime | Where | Revocable |
+|---|---|---|---|
+| access (JWT) | 15 min | `Authorization` header, stored nowhere server-side | no — stateless |
+| refresh | 7 days | `refresh_tokens` table (SHA-256 hash only) | yes — delete the row |
+
+```powershell
+# swap a refresh token for a fresh pair (the old refresh token is spent)
+curl.exe -X POST http://localhost:8090/api/auth/refresh -H "Content-Type: application/json" -d "{\"refresh_token\":\"283c...\"}"
+
+# revoke a refresh token
+curl.exe -X POST http://localhost:8090/api/auth/logout -H "Content-Type: application/json" -d "{\"refresh_token\":\"283c...\"}"
+```
+
+**Best-practice notes baked in:**
+- Passwords are **bcrypt**-hashed; refresh tokens are **SHA-256**-hashed (a
+  256-bit random token needs no slow hash). The plain refresh token is shown
+  once and never stored.
+- **Refresh rotation**: refreshing spends the old token and issues a new one, so
+  a stolen refresh token works at most once.
+- A wrong email and a wrong password return the **same 401**, so you cannot
+  probe which emails are registered.
+- `ParseAccess` pins the signing algorithm (`HS256` only), defeating the
+  `alg=none` and key-confusion forgery attacks.
+- Set **`JWT_SECRET`** in production. Unset, the app uses an insecure dev default
+  and logs a warning; anyone who knows the secret can forge any user's token.
 
 ## Endpoints
 | Method | Path             | Auth | Body                          | Success | Errors             |
 |--------|------------------|------|-------------------------------|---------|--------------------|
 | GET    | /health          | no   | –                             | 200     | –                  |
-| POST   | /api/users       | no   | `{"email":"...","name":"..."}`| 201     | 400, 409, 415      |
+| POST   | /api/auth/login  | no   | `{"email":"...","password":"..."}` | 200 | 400, 401, 415    |
+| POST   | /api/auth/refresh| no   | `{"refresh_token":"..."}`     | 200     | 400, 401, 415      |
+| POST   | /api/auth/logout | no   | `{"refresh_token":"..."}`     | 204     | 400, 415           |
+| POST   | /api/users       | no   | `{"email":"...","name":"...","password":"..."}` | 201 | 400, 409, 415 |
 | GET    | /api/users       | yes  | –                             | 200     | 401                |
 | GET    | /api/users/me    | yes  | –                             | 200     | 401                |
 | GET    | /api/users/{id}  | yes  | –                             | 200     | 400, 401, 404      |
@@ -139,9 +171,11 @@ then `RequireAdmin` (may you be here?). They guard the whole `/api/admin`
 sub-router, so you cannot add an admin endpoint and forget the check.
 
 ```powershell
-$ADMIN = "Authorization: Bearer alice-token-123"   # Alice
-$MEM   = "Authorization: Bearer bob-token-456"     # Bob
-$J     = "Content-Type: application/json"
+$J = "Content-Type: application/json"
+
+# log in, capture each user's access token
+$MEM   = "Authorization: Bearer " + (curl.exe -s -X POST -H $J -d '{\"email\":\"bob@example.com\",\"password\":\"password123\"}'   http://localhost:8090/api/auth/login | ConvertFrom-Json).access_token
+$ADMIN = "Authorization: Bearer " + (curl.exe -s -X POST -H $J -d '{\"email\":\"alice@example.com\",\"password\":\"password123\"}' http://localhost:8090/api/auth/login | ConvertFrom-Json).access_token
 
 # Bob does the work
 curl.exe -X POST http://localhost:8090/api/tasks -H $MEM -H $J -d "{\"title\":\"my task\"}"
@@ -209,7 +243,8 @@ Delivery runs in a goroutine on a context detached with `context.WithoutCancel`,
 so it is **not** killed when the HTTP request that triggered it ends. Failures
 are logged, never returned: a broken subscriber must not fail your request.
 
-See it locally without the internet — run the receiver in a second terminal:
+See it locally without the internet — run the receiver in a second terminal
+(`$A` is a `Authorization: Bearer <access_token>` header from `/api/auth/login`):
 ```powershell
 go run ./cmd/echo        # listens on http://localhost:9999/hook
 curl.exe -X POST http://localhost:8090/api/webhooks -H $A -H $J -d "{\"url\":\"http://localhost:9999/hook\"}"
@@ -232,8 +267,8 @@ waiting for the result.
 
 ## Validation
 - `502` — a third-party API we depend on failed (`ErrUpstream`)
-- `401` — missing, malformed, or unknown bearer token
-- `403` — editing or deleting a user who isn't you
+- `401` — missing, malformed, or expired JWT; also wrong login credentials
+- `403` — a member hitting an admin route, or editing a user who isn't you
 - `409` — email already taken (Postgres `unique_violation`, code 23505)
 - `415` — `Content-Type` is not `application/json`
 - `400` — malformed JSON, unknown field, body over 1 MiB, non-positive id,
@@ -244,9 +279,9 @@ Emails are checked with `net/mail.ParseAddress`.
 
 ## Try it (use `curl.exe`, not PowerShell's `curl` alias)
 ```powershell
-$A = "Authorization: Bearer alice-token-123"
-$B = "Authorization: Bearer bob-token-456"
 $J = "Content-Type: application/json"
+$A = "Authorization: Bearer " + (curl.exe -s -X POST -H $J -d '{\"email\":\"alice@example.com\",\"password\":\"password123\"}' http://localhost:8090/api/auth/login | ConvertFrom-Json).access_token
+$B = "Authorization: Bearer " + (curl.exe -s -X POST -H $J -d '{\"email\":\"bob@example.com\",\"password\":\"password123\"}'   http://localhost:8090/api/auth/login | ConvertFrom-Json).access_token
 
 curl.exe -H $A http://localhost:8090/api/users/me
 curl.exe -H $A http://localhost:8090/api/users
@@ -263,6 +298,6 @@ curl.exe -i -X DELETE http://localhost:8090/api/tasks/1 -H $A
 curl.exe -i http://localhost:8090/api/tasks                                                     # 401 no token
 curl.exe -i -H $B http://localhost:8090/api/tasks/1                                             # 404 Alice's task, as Bob
 curl.exe -i -X PUT http://localhost:8090/api/users/2 -H $A -H $J -d "{\"email\":\"x@y.com\",\"name\":\"X\"}"  # 403 not you
-curl.exe -i -X POST http://localhost:8090/api/users -H $J -d "{\"email\":\"alice@example.com\",\"name\":\"X\"}"  # 409 taken
+curl.exe -i -X POST http://localhost:8090/api/users -H $J -d "{\"email\":\"alice@example.com\",\"name\":\"X\",\"password\":\"password123\"}"  # 409 taken
 curl.exe -i -X POST http://localhost:8090/api/tasks -H $A -H $J -d "{\"title\":\"  \"}"           # 400
 ```

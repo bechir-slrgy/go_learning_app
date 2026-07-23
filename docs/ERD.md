@@ -8,18 +8,27 @@ holds. Matches `initdb/schema.sql`.
 
 ```mermaid
 erDiagram
-    users ||--o{ tasks         : "owns"
-    users ||--o{ tasks         : "reviewed"
-    users ||--o{ webhooks      : "registers"
-    users ||--o{ notifications : "receives"
-    tasks ||--o{ notifications : "is about"
+    users ||--o{ tasks          : "owns"
+    users ||--o{ tasks          : "reviewed"
+    users ||--o{ webhooks       : "registers"
+    users ||--o{ notifications  : "receives"
+    users ||--o{ refresh_tokens : "holds"
+    tasks ||--o{ notifications  : "is about"
 
     users {
+        integer     id            PK "serial"
+        text        email         UK "NOT NULL"
+        text        name             "NOT NULL"
+        text        password_hash    "NOT NULL, bcrypt, never returned"
+        text        role             "NOT NULL, default 'member', CHECK admin|member"
+        timestamptz created_at       "NOT NULL, default now()"
+    }
+
+    refresh_tokens {
         integer     id         PK "serial"
-        text        email      UK "NOT NULL"
-        text        name          "NOT NULL"
-        text        api_token  UK "NOT NULL, plain text (demo only)"
-        text        role          "NOT NULL, default 'member', CHECK admin|member"
+        integer     user_id    FK "NOT NULL, ON DELETE CASCADE"
+        text        token_hash UK "NOT NULL, SHA-256 of the token, never the token"
+        timestamptz expires_at    "NOT NULL"
         timestamptz created_at    "NOT NULL, default now()"
     }
 
@@ -60,8 +69,10 @@ parents, because a notification is always *someone* being told about *something*
 | --- | --- | --- |
 | users | `users_pkey` | PRIMARY KEY (id) |
 | users | `users_email_key` | UNIQUE (email) |
-| users | `users_api_token_key` | UNIQUE (api_token) |
 | users | `users_role_check` | CHECK (role IN ('admin','member')) |
+| refresh_tokens | `refresh_tokens_pkey` | PRIMARY KEY (id) |
+| refresh_tokens | `refresh_tokens_token_hash_key` | UNIQUE (token_hash) |
+| refresh_tokens | `refresh_tokens_user_id_fkey` | FK → users(id) ON DELETE CASCADE |
 | tasks | `tasks_pkey` | PRIMARY KEY (id) |
 | tasks | `tasks_user_id_fkey` | FK → users(id) **ON DELETE CASCADE** |
 | tasks | `tasks_reviewed_by_fkey` | FK → users(id) **ON DELETE SET NULL** |
@@ -110,7 +121,8 @@ Go code runs.
 | --- | --- | --- | --- |
 | users | `users_pkey` | id | primary key |
 | users | `users_email_key` | email | UNIQUE, and the signup conflict check |
-| users | `users_api_token_key` | api_token | UNIQUE, and **every authenticated request looks a token up here** |
+| users | `users_email_key` | email | UNIQUE, and **login looks the user up by email here** |
+| refresh_tokens | `refresh_tokens_token_hash_key` | token_hash | UNIQUE, and refresh/logout look the token up by its hash |
 | tasks | `tasks_pkey` | id | primary key |
 | tasks | `tasks_user_id_idx` | user_id | every member query filters on it |
 | tasks | `tasks_status_idx` | status | the admin review queue filters on it |
@@ -125,9 +137,10 @@ filtering on `read` alone. Leftmost-prefix rule.
 
 - **No `updated_at`.** Nothing in the API reports when a row last changed.
 - **No soft deletes.** `DELETE` is real, which is why the cascades matter.
-- **Tokens are plain text.** A real system stores a hash, so a database leak
-  does not hand over working credentials. Kept plain here because the project
-  has no signup-then-login flow to re-issue them.
+- **Passwords are bcrypt-hashed**, never stored plain (`users.password_hash`).
+  Refresh tokens are SHA-256-hashed (`refresh_tokens.token_hash`) — bcrypt would
+  be wrong there, since a 256-bit random token needs no slow hash and lookups
+  must be fast. Access tokens (JWTs) are stateless and stored nowhere.
 - **The audit trail is shallow.** `reviewed_by` / `reviewed_at` record only the
   *most recent* decision, and a resubmission clears them. There is no history
   table, so "rejected twice, then approved" is not recoverable. A real audit log
