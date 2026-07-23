@@ -1,14 +1,22 @@
 -- Runs automatically the first time the Postgres volume initializes.
 -- Changed this file? Wipe the volume so it re-runs: docker compose down -v
+
+-- pgcrypto gives us crypt()/gen_salt('bf') to bcrypt the seed passwords below.
+-- gen_salt('bf') produces standard $2a$ bcrypt hashes, which Go's
+-- golang.org/x/crypto/bcrypt verifies without any special handling.
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE IF NOT EXISTS users (
-    id         SERIAL PRIMARY KEY,
-    email      TEXT NOT NULL UNIQUE,
-    name       TEXT NOT NULL,
-    api_token  TEXT NOT NULL UNIQUE,
+    id            SERIAL PRIMARY KEY,
+    email         TEXT NOT NULL UNIQUE,
+    name          TEXT NOT NULL,
+    -- Never the password: only its bcrypt hash. bcrypt salts internally and is
+    -- deliberately slow, so a database leak does not hand over the passwords.
+    password_hash TEXT NOT NULL,
     -- CHECK is the database refusing to store a role the app doesn't know.
     -- Validation in Go can be bypassed by any other client; this cannot.
-    role       TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member')),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    role          TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member')),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -67,12 +75,26 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, read);
 
--- Demo tokens, plain text on purpose: this project has no signup flow.
--- A real API stores a hash of the token, never the token itself.
+-- Refresh tokens, stored as SHA-256 hashes, never the token itself. A row is
+-- deleted on logout or when rotated by a refresh. An access token cannot be
+-- revoked (it is stateless and short-lived); a refresh token can, by deleting
+-- its row here.
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id         SERIAL PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS refresh_tokens_user_idx ON refresh_tokens (user_id);
+
+-- Seed users. Both have the dev password "password123", bcrypt-hashed by
+-- pgcrypto so no plaintext lives here. Log in via POST /api/auth/login.
 -- Alice is the admin (reviews work); Bob is a member (submits work).
-INSERT INTO users (email, name, api_token, role) VALUES
-    ('alice@example.com', 'Alice', 'alice-token-123', 'admin'),
-    ('bob@example.com',   'Bob',   'bob-token-456',   'member');
+INSERT INTO users (email, name, password_hash, role) VALUES
+    ('alice@example.com', 'Alice', crypt('password123', gen_salt('bf')), 'admin'),
+    ('bob@example.com',   'Bob',   crypt('password123', gen_salt('bf')), 'member');
 
 INSERT INTO tasks (user_id, title) VALUES
     (1, 'learn Go structs'),
