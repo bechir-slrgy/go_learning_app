@@ -24,17 +24,19 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-type UserWithToken struct {
-	User
-	Token string `json:"token"`
-}
+const minPasswordLen = 8
 
 type UserInput struct {
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Password string `json:"password"`
 }
 
-func (in *UserInput) Validate() error {
+// ValidateProfile checks the fields an update may change. Signup also needs a
+// password, which is why Validate wraps this and adds the password rule: an
+// update reuses the profile checks without demanding a password it does not
+// carry.
+func (in *UserInput) ValidateProfile() error {
 	in.Email = strings.TrimSpace(in.Email)
 	in.Name = strings.TrimSpace(in.Name)
 
@@ -51,4 +53,41 @@ func (in *UserInput) Validate() error {
 		return fmt.Errorf("%w: name must be 100 characters or fewer", ErrInvalid)
 	}
 	return nil
+}
+
+func (in *UserInput) Validate() error {
+	if err := in.ValidateProfile(); err != nil {
+		return err
+	}
+	// The password is not trimmed: leading and trailing spaces are legitimate
+	// password characters, and bcrypt caps the input at 72 bytes anyway.
+	if len(in.Password) < minPasswordLen {
+		return fmt.Errorf("%w: password must be at least %d characters", ErrInvalid, minPasswordLen)
+	}
+	if len(in.Password) > 72 {
+		return fmt.Errorf("%w: password must be 72 characters or fewer", ErrInvalid)
+	}
+	return nil
+}
+
+// LoginInput is the credentials POSTed to /api/login. Deliberately not
+// validated for length: telling an attacker "that is too short to be our
+// password" leaks the rule. A wrong login is always a plain 401.
+type LoginInput struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+// RefreshInput and its sibling carry the opaque refresh token.
+type RefreshInput struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
+// TokenPair is what login and refresh return. AccessExpiresIn is seconds, so a
+// client knows when to refresh without parsing the JWT.
+type TokenPair struct {
+	AccessToken     string `json:"access_token"`
+	RefreshToken    string `json:"refresh_token"`
+	TokenType       string `json:"token_type"`
+	AccessExpiresIn int    `json:"access_expires_in"`
 }
