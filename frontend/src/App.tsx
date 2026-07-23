@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, ApiError, clearToken, getToken, setToken } from './api/client'
+import { api, ApiError, clearTokens, isLoggedIn } from './api/client'
 import type { User } from './api/types'
 import { AdminQueue } from './components/AdminQueue'
 import { Login } from './components/Login'
@@ -24,7 +24,7 @@ export default function App() {
   }, [])
 
   const loadUser = useCallback(async () => {
-    if (!getToken()) {
+    if (!isLoggedIn()) {
       setUser(null)
       setLoading(false)
       return
@@ -34,7 +34,7 @@ export default function App() {
       setError('')
       void refreshUnread()
     } catch (e) {
-      clearToken()
+      clearTokens()
       setUser(null)
       if (e instanceof ApiError && e.status !== 401) setError(e.message)
       else if (!(e instanceof ApiError)) setError('Cannot reach the API. Is `go run ./cmd/api` running?')
@@ -47,14 +47,13 @@ export default function App() {
     void loadUser()
   }, [loadUser])
 
-  function login(token: string) {
-    setToken(token)
+  function onAuthed() {
     setLoading(true)
     void loadUser()
   }
 
-  function logout() {
-    clearToken()
+  async function logout() {
+    await api.logout()
     setUser(null)
     setTab('tasks')
   }
@@ -65,7 +64,7 @@ export default function App() {
     return (
       <main className="wrap">
         {error && <p className="error">{error}</p>}
-        <Login onLogin={login} />
+        <Login onAuthed={onAuthed} />
       </main>
     )
   }
@@ -79,7 +78,7 @@ export default function App() {
           <strong>{user.name}</strong> <span className="badge">{user.role}</span>
           <div className="muted small">{user.email}</div>
         </div>
-        <button onClick={logout}>Sign out</button>
+        <button onClick={() => void logout()}>Sign out</button>
       </header>
 
       <nav className="tabs">

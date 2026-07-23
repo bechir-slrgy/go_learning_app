@@ -40,3 +40,10 @@ export interface ApiErrorBody {
   status: number
   message: string
 }
+
+export interface TokenPair {
+  access_token: string
+  refresh_token: string
+  token_type: string
+  access_expires_in: number
+}

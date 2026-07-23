@@ -1,43 +1,80 @@
 import { useState } from 'react'
+import { api, ApiError } from '../api/client'
 
-const DEMO_USERS = [
-  { name: 'Alice', role: 'admin', token: 'alice-token-123' },
-  { name: 'Bob', role: 'member', token: 'bob-token-456' },
-]
+export function Login({ onAuthed }: { onAuthed: () => void }) {
+  const [mode, setMode] = useState<'login' | 'signup'>('login')
+  const [email, setEmail] = useState('')
+  const [name, setName] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
-export function Login({ onLogin }: { onLogin: (token: string) => void }) {
-  const [manual, setManual] = useState('')
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      if (mode === 'signup') {
+        await api.signup(email, name, password)
+      }
+      await api.login(email, password)
+      onAuthed()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   return (
     <div className="card login">
       <h1>Task API</h1>
-      <p className="muted">
-        There is no password login: the API authenticates with a bearer token.
-        Pick a seeded user, or paste a token from <code>POST /api/users</code>.
-      </p>
 
-      <div className="stack">
-        {DEMO_USERS.map((u) => (
-          <button key={u.token} className="primary" onClick={() => onLogin(u.token)}>
-            Sign in as {u.name} <span className="badge">{u.role}</span>
-          </button>
-        ))}
+      <div className="tabs">
+        <button className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
+          Sign in
+        </button>
+        <button className={mode === 'signup' ? 'active' : ''} onClick={() => setMode('signup')}>
+          Sign up
+        </button>
       </div>
 
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (manual.trim()) onLogin(manual.trim())
-        }}
-      >
+      <form className="stack" onSubmit={submit}>
         <input
-          value={manual}
-          onChange={(e) => setManual(e.target.value)}
-          placeholder="or paste a token"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Email"
+          autoComplete="email"
+          required
         />
-        <button type="submit">Use</button>
+        {mode === 'signup' && (
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Name"
+            required
+          />
+        )}
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password"
+          autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+          required
+        />
+        <button className="primary" type="submit" disabled={busy}>
+          {mode === 'login' ? 'Sign in' : 'Create account'}
+        </button>
       </form>
+
+      {error && <p className="error">{error}</p>}
+
+      <p className="muted small">
+        Seeded users: <code>alice@example.com</code> (admin) and{' '}
+        <code>bob@example.com</code> (member), password <code>password123</code>.
+      </p>
     </div>
   )
 }
