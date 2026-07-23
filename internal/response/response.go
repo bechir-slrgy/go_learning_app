@@ -24,12 +24,20 @@ func Error(w http.ResponseWriter, status int, message string) {
 	JSON(w, status, ResponseError{Status: status, Message: message})
 }
 
+// Unauthorized is a 401 with the WWW-Authenticate header the HTTP spec requires
+// for that status. It tells a client the resource is protected by a bearer
+// token, which is the correct machine-readable "you need to log in" signal.
+func Unauthorized(w http.ResponseWriter, message string) {
+	w.Header().Set("WWW-Authenticate", `Bearer realm="api"`)
+	Error(w, http.StatusUnauthorized, message)
+}
+
 func ErrorFrom(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, model.ErrInvalid):
 		Error(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, model.ErrUnauthorized):
-		Error(w, http.StatusUnauthorized, "unauthorized")
+		Unauthorized(w, "unauthorized")
 	case errors.Is(err, model.ErrForbidden):
 		Error(w, http.StatusForbidden, "forbidden")
 	case errors.Is(err, model.ErrNotFound):

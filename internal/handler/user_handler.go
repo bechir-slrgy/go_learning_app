@@ -36,8 +36,18 @@ func (h *UserHandler) Router() http.Handler {
 	return r
 }
 
+// me returns the full current user. The context carries only what the token
+// claims (id, role, name), so email and created_at come from a fresh load.
+// This is the one place the "trust claims" design pays a query, and it is a
+// rare call, so that is fine.
 func (h *UserHandler) me(w http.ResponseWriter, r *http.Request) {
-	response.JSON(w, http.StatusOK, userFrom(r.Context()))
+	claims := userFrom(r.Context())
+	u, err := h.users.Get(r.Context(), claims.ID)
+	if err != nil {
+		response.ErrorFrom(w, err)
+		return
+	}
+	response.JSON(w, http.StatusOK, u)
 }
 
 func (h *UserHandler) list(w http.ResponseWriter, r *http.Request) {

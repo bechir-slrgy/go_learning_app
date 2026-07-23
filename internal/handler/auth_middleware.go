@@ -9,8 +9,11 @@ import (
 	"task_crud_api/internal/response"
 )
 
-type Authenticator interface {
-	ByToken(ctx context.Context, token string) (model.User, error)
+// TokenVerifier is all the middleware needs: turn a raw JWT into the user it
+// stands for. The concrete *auth.TokenService satisfies it. Verification is
+// pure signature + expiry maths, so there is no database call per request.
+type TokenVerifier interface {
+	ParseAccess(raw string) (model.User, error)
 }
 
 type ctxKey struct{}
@@ -18,24 +21,29 @@ type ctxKey struct{}
 var userKey = ctxKey{}
 
 type Auth struct {
-	users Authenticator
+	tokens TokenVerifier
 }
 
-func NewAuth(users Authenticator) *Auth {
-	return &Auth{users: users}
+func NewAuth(tokens TokenVerifier) *Auth {
+	return &Auth{tokens: tokens}
 }
 
+// RequireUser is the authentication gate. It reads the bearer JWT, verifies it,
+// and puts the user (built from the token's claims) on the request context.
 func (a *Auth) RequireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := bearerToken(r)
-		if token == "" {
-			response.ErrorFrom(w, model.ErrUnauthorized)
+		raw := bearerToken(r)
+		if raw == "" {
+			response.Unauthorized(w, "missing bearer token")
 			return
 		}
 
-		user, err := a.users.ByToken(r.Context(), token)
+		user, err := a.tokens.ParseAccess(raw)
 		if err != nil {
-			response.ErrorFrom(w, err)
+			// Every parse failure (bad signature, expired, wrong issuer) is a
+			// 401 with the same body: never tell a caller why their token was
+			// rejected in a way that helps forge a better one.
+			response.Unauthorized(w, "invalid or expired token")
 			return
 		}
 
@@ -44,6 +52,9 @@ func (a *Auth) RequireUser(next http.Handler) http.Handler {
 	})
 }
 
+// RequireAdmin is the authorization gate. It runs after RequireUser and reads
+// the role straight off the context (i.e. from the verified token), so an
+// admin check is one comparison and no query.
 func (a *Auth) RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !userFrom(r.Context()).Role.IsAdmin() {
@@ -60,7 +71,7 @@ func bearerToken(r *http.Request) string {
 	if !strings.HasPrefix(h, prefix) {
 		return ""
 	}
-	return strings.TrimPrefix(h, prefix)
+	return strings.TrimSpace(strings.TrimPrefix(h, prefix))
 }
 
 func userFrom(ctx context.Context) model.User {
