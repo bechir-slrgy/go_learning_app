@@ -50,13 +50,21 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pqErr) && pqErr.Code == "23505"
 }
 
-func (r *UserRepo) ByToken(ctx context.Context, token string) (model.User, error) {
-	u, err := scanUser(r.db.QueryRowContext(ctx,
-		`SELECT `+userColumns+` FROM users WHERE api_token = $1`, token))
+// ByEmailWithHash returns the user and their bcrypt hash, for login only. The
+// hash is a second return value, never a field on model.User, so it cannot
+// leak into a response by accident. Not-found returns ErrUnauthorized, not
+// ErrNotFound: "no such email" and "wrong password" must look identical to the
+// caller or you leak which emails are registered.
+func (r *UserRepo) ByEmailWithHash(ctx context.Context, email string) (model.User, string, error) {
+	var u model.User
+	var hash string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT `+userColumns+`, password_hash FROM users WHERE email = $1`, email).
+		Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.CreatedAt, &hash)
 	if errors.Is(err, sql.ErrNoRows) {
-		return model.User{}, model.ErrUnauthorized
+		return model.User{}, "", model.ErrUnauthorized
 	}
-	return u, err
+	return u, hash, err
 }
 
 func (r *UserRepo) List(ctx context.Context) ([]model.User, error) {
@@ -86,10 +94,10 @@ func (r *UserRepo) Get(ctx context.Context, id int) (model.User, error) {
 	return u, err
 }
 
-func (r *UserRepo) Create(ctx context.Context, email, name, token string) (model.User, error) {
+func (r *UserRepo) Create(ctx context.Context, email, name, passwordHash string) (model.User, error) {
 	u, err := scanUser(r.db.QueryRowContext(ctx,
-		`INSERT INTO users (email, name, api_token) VALUES ($1, $2, $3) RETURNING `+userColumns,
-		email, name, token))
+		`INSERT INTO users (email, name, password_hash) VALUES ($1, $2, $3) RETURNING `+userColumns,
+		email, name, passwordHash))
 	if isUniqueViolation(err) {
 		return model.User{}, model.ErrConflict
 	}
