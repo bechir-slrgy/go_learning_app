@@ -23,7 +23,7 @@ export function AdminQueue({ onChange }: { onChange: () => void }) {
     void load(status)
   }, [status])
 
-  async function decide(id: number, approve: boolean) {
+  async function decide(id: string, approve: boolean) {
     setBusy(true)
     try {
       await (approve ? api.approveTask(id) : api.rejectTask(id))

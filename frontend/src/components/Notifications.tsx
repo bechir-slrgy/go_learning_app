@@ -19,7 +19,7 @@ export function Notifications({ onChange }: { onChange: () => void }) {
     void load()
   }, [])
 
-  async function markRead(id: number) {
+  async function markRead(id: string) {
     try {
       await api.markRead(id)
       await load()

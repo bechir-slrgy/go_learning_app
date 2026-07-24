@@ -133,27 +133,27 @@ export const api = {
   listTasks: () => request<Task[]>('/tasks'),
   createTask: (title: string) =>
     request<Task>('/tasks', { method: 'POST', body: JSON.stringify({ title }) }),
-  updateTask: (id: number, title: string) =>
+  updateTask: (id: string, title: string) =>
     request<Task>(`/tasks/${id}`, { method: 'PUT', body: JSON.stringify({ title }) }),
-  deleteTask: (id: number) => request<void>(`/tasks/${id}`, { method: 'DELETE' }),
-  submitTask: (id: number) => request<Task>(`/tasks/${id}/submit`, { method: 'POST' }),
+  deleteTask: (id: string) => request<void>(`/tasks/${id}`, { method: 'DELETE' }),
+  submitTask: (id: string) => request<Task>(`/tasks/${id}/submit`, { method: 'POST' }),
   importTasks: (limit: number) =>
     request<Task[]>(`/tasks/import?limit=${limit}`, { method: 'POST' }),
 
   // --- admin only: 403 for a member ---
   reviewQueue: (status: TaskStatus) => request<Task[]>(`/admin/tasks?status=${status}`),
-  approveTask: (id: number) =>
+  approveTask: (id: string) =>
     request<Task>(`/admin/tasks/${id}/approve`, { method: 'POST' }),
-  rejectTask: (id: number) =>
+  rejectTask: (id: string) =>
     request<Task>(`/admin/tasks/${id}/reject`, { method: 'POST' }),
 
   // --- notifications ---
   listNotifications: () => request<Notification[]>('/notifications'),
-  markRead: (id: number) => request<void>(`/notifications/${id}/read`, { method: 'POST' }),
+  markRead: (id: string) => request<void>(`/notifications/${id}/read`, { method: 'POST' }),
 
   // --- webhooks ---
   listWebhooks: () => request<Webhook[]>('/webhooks'),
   createWebhook: (url: string) =>
     request<Webhook>('/webhooks', { method: 'POST', body: JSON.stringify({ url }) }),
-  deleteWebhook: (id: number) => request<void>(`/webhooks/${id}`, { method: 'DELETE' }),
+  deleteWebhook: (id: string) => request<void>(`/webhooks/${id}`, { method: 'DELETE' }),
 }
