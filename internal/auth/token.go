@@ -5,16 +5,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 
 	"task_crud_api/internal/model"
 )
 
 const issuer = "task_crud_api"
-
 
 type AccessClaims struct {
 	Role model.Role `json:"role"`
@@ -44,7 +43,7 @@ func (s *TokenService) IssueAccess(u model.User, now time.Time) (string, time.Ti
 		Role: u.Role,
 		Name: u.Name,
 		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   strconv.Itoa(u.ID),
+			Subject:   u.ID.String(),
 			Issuer:    issuer,
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
@@ -57,7 +56,6 @@ func (s *TokenService) IssueAccess(u model.User, now time.Time) (string, time.Ti
 	}
 	return signed, expiresAt, nil
 }
-
 
 func (s *TokenService) ParseAccess(raw string) (model.User, error) {
 	var claims AccessClaims
@@ -72,7 +70,7 @@ func (s *TokenService) ParseAccess(raw string) (model.User, error) {
 		return model.User{}, model.ErrUnauthorized
 	}
 
-	id, err := strconv.Atoi(claims.Subject)
+	id, err := uuid.Parse(claims.Subject)
 	if err != nil {
 		return model.User{}, model.ErrUnauthorized
 	}

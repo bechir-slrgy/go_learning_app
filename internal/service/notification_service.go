@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/google/uuid"
+
 	"task_crud_api/internal/model"
 )
 
 type NotificationRepo interface {
-	List(ctx context.Context, userID int) ([]model.Notification, error)
-	Create(ctx context.Context, userID, taskID int, message string) (model.Notification, error)
-	MarkRead(ctx context.Context, userID, id int) error
+	List(ctx context.Context, userID uuid.UUID) ([]model.Notification, error)
+	Create(ctx context.Context, userID, taskID uuid.UUID, message string) (model.Notification, error)
+	MarkRead(ctx context.Context, userID, id uuid.UUID) error
 }
 
 type UserLister interface {
@@ -27,11 +29,11 @@ func NewNotificationService(repo NotificationRepo, users UserLister) *Notificati
 	return &NotificationService{repo: repo, users: users}
 }
 
-func (s *NotificationService) List(ctx context.Context, userID int) ([]model.Notification, error) {
+func (s *NotificationService) List(ctx context.Context, userID uuid.UUID) ([]model.Notification, error) {
 	return s.repo.List(ctx, userID)
 }
 
-func (s *NotificationService) MarkRead(ctx context.Context, userID, id int) error {
+func (s *NotificationService) MarkRead(ctx context.Context, userID, id uuid.UUID) error {
 	return s.repo.MarkRead(ctx, userID, id)
 }
 
@@ -45,7 +47,7 @@ func (s *NotificationService) TaskSubmitted(ctx context.Context, t model.Task, s
 	msg := fmt.Sprintf("%s submitted %q for review", submitter.Name, t.Title)
 	for _, admin := range admins {
 		if _, err := s.repo.Create(ctx, admin.ID, t.ID, msg); err != nil {
-			log.Printf("notify admin %d: %v", admin.ID, err)
+			log.Printf("notify admin %s: %v", admin.ID, err)
 		}
 	}
 }
@@ -53,6 +55,6 @@ func (s *NotificationService) TaskSubmitted(ctx context.Context, t model.Task, s
 func (s *NotificationService) TaskReviewed(ctx context.Context, t model.Task, reviewer model.User) {
 	msg := fmt.Sprintf("%s %s your task %q", reviewer.Name, t.Status, t.Title)
 	if _, err := s.repo.Create(ctx, t.UserID, t.ID, msg); err != nil {
-		log.Printf("notify owner %d: %v", t.UserID, err)
+		log.Printf("notify owner %s: %v", t.UserID, err)
 	}
 }

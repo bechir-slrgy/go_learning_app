@@ -4,20 +4,22 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
+
 	"task_crud_api/internal/model"
 )
 
 type TaskRepo interface {
-	List(ctx context.Context, userID int) ([]model.Task, error)
-	Get(ctx context.Context, userID, id int) (model.Task, error)
-	Create(ctx context.Context, userID int, title string) (model.Task, error)
-	Update(ctx context.Context, userID, id int, title string) (model.Task, error)
-	Delete(ctx context.Context, userID, id int) error
+	List(ctx context.Context, userID uuid.UUID) ([]model.Task, error)
+	Get(ctx context.Context, userID, id uuid.UUID) (model.Task, error)
+	Create(ctx context.Context, userID uuid.UUID, title string) (model.Task, error)
+	Update(ctx context.Context, userID, id uuid.UUID, title string) (model.Task, error)
+	Delete(ctx context.Context, userID, id uuid.UUID) error
 
-	GetAny(ctx context.Context, id int) (model.Task, error)
+	GetAny(ctx context.Context, id uuid.UUID) (model.Task, error)
 	ListByStatus(ctx context.Context, status model.TaskStatus) ([]model.Task, error)
-	SetStatus(ctx context.Context, id int, status model.TaskStatus) (model.Task, error)
-	SetReviewed(ctx context.Context, id int, status model.TaskStatus, reviewerID int) (model.Task, error)
+	SetStatus(ctx context.Context, id uuid.UUID, status model.TaskStatus) (model.Task, error)
+	SetReviewed(ctx context.Context, id uuid.UUID, status model.TaskStatus, reviewerID uuid.UUID) (model.Task, error)
 }
 
 type Alerter interface {
@@ -26,7 +28,7 @@ type Alerter interface {
 }
 
 type Notifier interface {
-	TaskCreated(ctx context.Context, userID int, t model.Task)
+	TaskCreated(ctx context.Context, userID uuid.UUID, t model.Task)
 }
 
 type Getter interface {
@@ -44,15 +46,15 @@ func NewTaskService(repo TaskRepo, notifier Notifier, fetcher Getter, alerts Ale
 	return &TaskService{repo: repo, notifier: notifier, fetcher: fetcher, alerts: alerts}
 }
 
-func (s *TaskService) List(ctx context.Context, userID int) ([]model.Task, error) {
+func (s *TaskService) List(ctx context.Context, userID uuid.UUID) ([]model.Task, error) {
 	return s.repo.List(ctx, userID)
 }
 
-func (s *TaskService) Get(ctx context.Context, userID, id int) (model.Task, error) {
+func (s *TaskService) Get(ctx context.Context, userID, id uuid.UUID) (model.Task, error) {
 	return s.repo.Get(ctx, userID, id)
 }
 
-func (s *TaskService) Create(ctx context.Context, userID int, in model.TaskInput) (model.Task, error) {
+func (s *TaskService) Create(ctx context.Context, userID uuid.UUID, in model.TaskInput) (model.Task, error) {
 	if err := in.Validate(); err != nil {
 		return model.Task{}, err
 	}
@@ -66,14 +68,14 @@ func (s *TaskService) Create(ctx context.Context, userID int, in model.TaskInput
 	return t, nil
 }
 
-func (s *TaskService) Update(ctx context.Context, userID, id int, in model.TaskInput) (model.Task, error) {
+func (s *TaskService) Update(ctx context.Context, userID, id uuid.UUID, in model.TaskInput) (model.Task, error) {
 	if err := in.Validate(); err != nil {
 		return model.Task{}, err
 	}
 	return s.repo.Update(ctx, userID, id, in.Title)
 }
 
-func (s *TaskService) Submit(ctx context.Context, submitter model.User, id int) (model.Task, error) {
+func (s *TaskService) Submit(ctx context.Context, submitter model.User, id uuid.UUID) (model.Task, error) {
 	t, err := s.repo.Get(ctx, submitter.ID, id)
 	if err != nil {
 		return model.Task{}, err
@@ -90,7 +92,7 @@ func (s *TaskService) Submit(ctx context.Context, submitter model.User, id int) 
 	return t, nil
 }
 
-func (s *TaskService) Review(ctx context.Context, reviewer model.User, id int, decision model.TaskStatus) (model.Task, error) {
+func (s *TaskService) Review(ctx context.Context, reviewer model.User, id uuid.UUID, decision model.TaskStatus) (model.Task, error) {
 	if decision != model.StatusApproved && decision != model.StatusRejected {
 		return model.Task{}, fmt.Errorf("%w: decision must be approved or rejected", model.ErrInvalid)
 	}
@@ -124,7 +126,7 @@ func (s *TaskService) ReviewQueue(ctx context.Context, reviewer model.User, stat
 	return s.repo.ListByStatus(ctx, status)
 }
 
-func (s *TaskService) Delete(ctx context.Context, userID, id int) error {
+func (s *TaskService) Delete(ctx context.Context, userID, id uuid.UUID) error {
 	return s.repo.Delete(ctx, userID, id)
 }
 
@@ -135,7 +137,7 @@ type externalTodo struct {
 	Completed bool   `json:"completed"`
 }
 
-func (s *TaskService) Import(ctx context.Context, userID, limit int) ([]model.Task, error) {
+func (s *TaskService) Import(ctx context.Context, userID uuid.UUID, limit int) ([]model.Task, error) {
 	if limit < 1 || limit > 20 {
 		return nil, fmt.Errorf("%w: limit must be between 1 and 20", model.ErrInvalid)
 	}

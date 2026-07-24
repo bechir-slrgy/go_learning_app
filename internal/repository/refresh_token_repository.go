@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
+
 	"task_crud_api/internal/model"
 )
 
@@ -17,7 +19,7 @@ func NewRefreshTokenRepo(db *sql.DB) *RefreshTokenRepo {
 	return &RefreshTokenRepo{db: db}
 }
 
-func (r *RefreshTokenRepo) Create(ctx context.Context, userID int, hash string, expiresAt time.Time) error {
+func (r *RefreshTokenRepo) Create(ctx context.Context, userID uuid.UUID, hash string, expiresAt time.Time) error {
 	_, err := r.db.ExecContext(ctx,
 		`INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`,
 		userID, hash, expiresAt)
@@ -45,7 +47,7 @@ func (r *RefreshTokenRepo) DeleteByHash(ctx context.Context, hash string) error 
 }
 
 // DeleteForUser drops every refresh token a user holds. "Log out everywhere".
-func (r *RefreshTokenRepo) DeleteForUser(ctx context.Context, userID int) error {
+func (r *RefreshTokenRepo) DeleteForUser(ctx context.Context, userID uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM refresh_tokens WHERE user_id = $1`, userID)
 	return err
 }

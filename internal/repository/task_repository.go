@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/google/uuid"
+
 	"task_crud_api/internal/model"
 )
 
@@ -26,7 +28,7 @@ func scanTask(row scanner) (model.Task, error) {
 	return t, err
 }
 
-func (r *TaskRepo) List(ctx context.Context, userID int) ([]model.Task, error) {
+func (r *TaskRepo) List(ctx context.Context, userID uuid.UUID) ([]model.Task, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+taskColumns+` FROM tasks WHERE user_id = $1 ORDER BY id`, userID)
 	if err != nil {
@@ -35,7 +37,7 @@ func (r *TaskRepo) List(ctx context.Context, userID int) ([]model.Task, error) {
 	return collectTasks(rows)
 }
 
-func (r *TaskRepo) Get(ctx context.Context, userID, id int) (model.Task, error) {
+func (r *TaskRepo) Get(ctx context.Context, userID, id uuid.UUID) (model.Task, error) {
 	t, err := scanTask(r.db.QueryRowContext(ctx,
 		`SELECT `+taskColumns+` FROM tasks WHERE id = $1 AND user_id = $2`, id, userID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -44,13 +46,13 @@ func (r *TaskRepo) Get(ctx context.Context, userID, id int) (model.Task, error) 
 	return t, err
 }
 
-func (r *TaskRepo) Create(ctx context.Context, userID int, title string) (model.Task, error) {
+func (r *TaskRepo) Create(ctx context.Context, userID uuid.UUID, title string) (model.Task, error) {
 	return scanTask(r.db.QueryRowContext(ctx,
 		`INSERT INTO tasks (user_id, title) VALUES ($1, $2) RETURNING `+taskColumns,
 		userID, title))
 }
 
-func (r *TaskRepo) Update(ctx context.Context, userID, id int, title string) (model.Task, error) {
+func (r *TaskRepo) Update(ctx context.Context, userID, id uuid.UUID, title string) (model.Task, error) {
 	t, err := scanTask(r.db.QueryRowContext(ctx,
 		`UPDATE tasks SET title = $1 WHERE id = $2 AND user_id = $3 RETURNING `+taskColumns,
 		title, id, userID))
@@ -60,7 +62,7 @@ func (r *TaskRepo) Update(ctx context.Context, userID, id int, title string) (mo
 	return t, err
 }
 
-func (r *TaskRepo) Delete(ctx context.Context, userID, id int) error {
+func (r *TaskRepo) Delete(ctx context.Context, userID, id uuid.UUID) error {
 	res, err := r.db.ExecContext(ctx,
 		`DELETE FROM tasks WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
@@ -76,7 +78,7 @@ func (r *TaskRepo) Delete(ctx context.Context, userID, id int) error {
 	return nil
 }
 
-func (r *TaskRepo) GetAny(ctx context.Context, id int) (model.Task, error) {
+func (r *TaskRepo) GetAny(ctx context.Context, id uuid.UUID) (model.Task, error) {
 	t, err := scanTask(r.db.QueryRowContext(ctx,
 		`SELECT `+taskColumns+` FROM tasks WHERE id = $1`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -94,7 +96,7 @@ func (r *TaskRepo) ListByStatus(ctx context.Context, status model.TaskStatus) ([
 	return collectTasks(rows)
 }
 
-func (r *TaskRepo) SetStatus(ctx context.Context, id int, status model.TaskStatus) (model.Task, error) {
+func (r *TaskRepo) SetStatus(ctx context.Context, id uuid.UUID, status model.TaskStatus) (model.Task, error) {
 	t, err := scanTask(r.db.QueryRowContext(ctx,
 		`UPDATE tasks SET status = $1, reviewed_by = NULL, reviewed_at = NULL
 		 WHERE id = $2 RETURNING `+taskColumns, status, id))
@@ -104,7 +106,7 @@ func (r *TaskRepo) SetStatus(ctx context.Context, id int, status model.TaskStatu
 	return t, err
 }
 
-func (r *TaskRepo) SetReviewed(ctx context.Context, id int, status model.TaskStatus, reviewerID int) (model.Task, error) {
+func (r *TaskRepo) SetReviewed(ctx context.Context, id uuid.UUID, status model.TaskStatus, reviewerID uuid.UUID) (model.Task, error) {
 	t, err := scanTask(r.db.QueryRowContext(ctx,
 		`UPDATE tasks SET status = $1, reviewed_by = $2, reviewed_at = now()
 		 WHERE id = $3 RETURNING `+taskColumns, status, reviewerID, id))

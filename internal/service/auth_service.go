@@ -6,20 +6,22 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/google/uuid"
 	"task_crud_api/internal/auth"
+
 	"task_crud_api/internal/model"
 )
 
 type Credentialer interface {
 	ByEmailWithHash(ctx context.Context, email string) (model.User, string, error)
-	Get(ctx context.Context, id int) (model.User, error)
+	Get(ctx context.Context, id uuid.UUID) (model.User, error)
 }
 
 type RefreshStore interface {
-	Create(ctx context.Context, userID int, hash string, expiresAt time.Time) error
+	Create(ctx context.Context, userID uuid.UUID, hash string, expiresAt time.Time) error
 	ByHash(ctx context.Context, hash string) (model.RefreshToken, error)
 	DeleteByHash(ctx context.Context, hash string) error
-	DeleteForUser(ctx context.Context, userID int) error
+	DeleteForUser(ctx context.Context, userID uuid.UUID) error
 }
 
 type Tokens interface {
@@ -36,7 +38,6 @@ type AuthService struct {
 func NewAuthService(users Credentialer, refresh RefreshStore, tokens Tokens) *AuthService {
 	return &AuthService{users: users, refresh: refresh, tokens: tokens}
 }
-
 
 func (s *AuthService) Login(ctx context.Context, in model.LoginInput) (model.TokenPair, error) {
 	user, hash, err := s.users.ByEmailWithHash(ctx, in.Email)

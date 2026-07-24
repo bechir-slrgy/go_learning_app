@@ -7,6 +7,8 @@ import (
 
 	"github.com/lib/pq"
 
+	"github.com/google/uuid"
+
 	"task_crud_api/internal/model"
 )
 
@@ -85,7 +87,7 @@ func (r *UserRepo) List(ctx context.Context) ([]model.User, error) {
 	return users, rows.Err()
 }
 
-func (r *UserRepo) Get(ctx context.Context, id int) (model.User, error) {
+func (r *UserRepo) Get(ctx context.Context, id uuid.UUID) (model.User, error) {
 	u, err := scanUser(r.db.QueryRowContext(ctx,
 		`SELECT `+userColumns+` FROM users WHERE id = $1`, id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -104,7 +106,7 @@ func (r *UserRepo) Create(ctx context.Context, email, name, passwordHash string)
 	return u, err
 }
 
-func (r *UserRepo) Update(ctx context.Context, id int, email, name string) (model.User, error) {
+func (r *UserRepo) Update(ctx context.Context, id uuid.UUID, email, name string) (model.User, error) {
 	u, err := scanUser(r.db.QueryRowContext(ctx,
 		`UPDATE users SET email = $1, name = $2 WHERE id = $3 RETURNING `+userColumns,
 		email, name, id))
@@ -117,7 +119,7 @@ func (r *UserRepo) Update(ctx context.Context, id int, email, name string) (mode
 	return u, err
 }
 
-func (r *UserRepo) Delete(ctx context.Context, id int) error {
+func (r *UserRepo) Delete(ctx context.Context, id uuid.UUID) error {
 	res, err := r.db.ExecContext(ctx, `DELETE FROM users WHERE id = $1`, id)
 	if err != nil {
 		return err

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/google/uuid"
+
 	"task_crud_api/internal/model"
 )
 
@@ -23,7 +25,7 @@ func scanNotification(row scanner) (model.Notification, error) {
 	return n, err
 }
 
-func (r *NotificationRepo) List(ctx context.Context, userID int) ([]model.Notification, error) {
+func (r *NotificationRepo) List(ctx context.Context, userID uuid.UUID) ([]model.Notification, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+notificationColumns+` FROM notifications
 		 WHERE user_id = $1 ORDER BY read ASC, created_at DESC`, userID)
@@ -43,13 +45,13 @@ func (r *NotificationRepo) List(ctx context.Context, userID int) ([]model.Notifi
 	return out, rows.Err()
 }
 
-func (r *NotificationRepo) Create(ctx context.Context, userID, taskID int, message string) (model.Notification, error) {
+func (r *NotificationRepo) Create(ctx context.Context, userID, taskID uuid.UUID, message string) (model.Notification, error) {
 	return scanNotification(r.db.QueryRowContext(ctx,
 		`INSERT INTO notifications (user_id, task_id, message) VALUES ($1, $2, $3)
 		 RETURNING `+notificationColumns, userID, taskID, message))
 }
 
-func (r *NotificationRepo) MarkRead(ctx context.Context, userID, id int) error {
+func (r *NotificationRepo) MarkRead(ctx context.Context, userID, id uuid.UUID) error {
 	res, err := r.db.ExecContext(ctx,
 		`UPDATE notifications SET read = true WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
