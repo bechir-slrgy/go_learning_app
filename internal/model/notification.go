@@ -1,11 +1,15 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type Notification struct {
-	ID        int       `json:"id"`
-	UserID    int       `json:"user_id"`
-	TaskID    int       `json:"task_id"`
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	TaskID    uuid.UUID `json:"task_id"`
 	Message   string    `json:"message"`
 	Read      bool      `json:"read"`
 	CreatedAt time.Time `json:"created_at"`

@@ -5,6 +5,8 @@ import (
 	"net/mail"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type Role string
@@ -17,7 +19,7 @@ const (
 func (r Role) IsAdmin() bool { return r == RoleAdmin }
 
 type User struct {
-	ID        int       `json:"id"`
+	ID        uuid.UUID `json:"id"`
 	Email     string    `json:"email"`
 	Name      string    `json:"name"`
 	Role      Role      `json:"role"`

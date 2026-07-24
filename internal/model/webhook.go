@@ -5,11 +5,13 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type Webhook struct {
-	ID        int       `json:"id"`
-	UserID    int       `json:"user_id"`
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
 	URL       string    `json:"url"`
 	CreatedAt time.Time `json:"created_at"`
 }

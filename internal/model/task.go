@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type TaskStatus string
@@ -38,12 +40,14 @@ func (s TaskStatus) Valid() bool {
 }
 
 type Task struct {
-	ID     int        `json:"id"`
-	UserID int        `json:"user_id"`
+	ID     uuid.UUID  `json:"id"`
+	UserID uuid.UUID  `json:"user_id"`
 	Title  string     `json:"title"`
 	Status TaskStatus `json:"status"`
 
-	ReviewedBy *int       `json:"reviewed_by"`
+	// A nullable UUID. *uuid.UUID marshals to JSON null when nil, and
+	// database/sql scans a NULL column straight into the nil pointer.
+	ReviewedBy *uuid.UUID `json:"reviewed_by"`
 	ReviewedAt *time.Time `json:"reviewed_at"`
 
 	CreatedAt time.Time `json:"created_at"`
