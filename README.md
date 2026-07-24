@@ -177,20 +177,20 @@ $J = "Content-Type: application/json"
 $MEM   = "Authorization: Bearer " + (curl.exe -s -X POST -H $J -d '{\"email\":\"bob@example.com\",\"password\":\"password123\"}'   http://localhost:8090/api/auth/login | ConvertFrom-Json).access_token
 $ADMIN = "Authorization: Bearer " + (curl.exe -s -X POST -H $J -d '{\"email\":\"alice@example.com\",\"password\":\"password123\"}' http://localhost:8090/api/auth/login | ConvertFrom-Json).access_token
 
-# Bob does the work
-curl.exe -X POST http://localhost:8090/api/tasks -H $MEM -H $J -d "{\"title\":\"my task\"}"
-curl.exe -X POST http://localhost:8090/api/tasks/4/submit -H $MEM
+# Bob does the work (ids are UUIDs, so capture the one you just created)
+$TID = (curl.exe -s -X POST http://localhost:8090/api/tasks -H $MEM -H $J -d "{\"title\":\"my task\"}" | ConvertFrom-Json).id
+curl.exe -X POST http://localhost:8090/api/tasks/$TID/submit -H $MEM
 
 # Alice reviews it
 curl.exe -H $ADMIN http://localhost:8090/api/notifications
 curl.exe -H $ADMIN "http://localhost:8090/api/admin/tasks?status=submitted"
-curl.exe -X POST -H $ADMIN http://localhost:8090/api/admin/tasks/4/approve
+curl.exe -X POST -H $ADMIN http://localhost:8090/api/admin/tasks/$TID/approve
 
 # Bob hears the verdict
 curl.exe -H $MEM http://localhost:8090/api/notifications
 
-# Bob tries to review his own work
-curl.exe -i -X POST -H $MEM http://localhost:8090/api/admin/tasks/4/approve   # 403
+# Bob tries to review his own work (needs a fresh submitted task)
+curl.exe -i -X POST -H $MEM http://localhost:8090/api/admin/tasks/$TID/approve   # 403
 ```
 
 **Two different privacy rules, on purpose:**
@@ -271,7 +271,7 @@ waiting for the result.
 - `403` — a member hitting an admin route, or editing a user who isn't you
 - `409` — email already taken (Postgres `unique_violation`, code 23505)
 - `415` — `Content-Type` is not `application/json`
-- `400` — malformed JSON, unknown field, body over 1 MiB, non-positive id,
+- `400` — malformed JSON, unknown field, body over 1 MiB, an id that is not a UUID,
   or a field rule broken (`invalid input: title is required`)
 
 Strings are trimmed before validation, so `"   "` is empty and rejected.
@@ -288,16 +288,17 @@ curl.exe -H $A http://localhost:8090/api/users
 curl.exe -H $A http://localhost:8090/api/tasks
 curl.exe -H $B http://localhost:8090/api/tasks     # different list entirely
 
-curl.exe -X POST http://localhost:8090/api/tasks -H $A -H $J -d "{\"title\":\"buy milk\"}"
+# ids are UUIDs; capture one from the response
+$TID = (curl.exe -s -X POST http://localhost:8090/api/tasks -H $A -H $J -d "{\"title\":\"buy milk\"}" | ConvertFrom-Json).id
 
-curl.exe -X PUT http://localhost:8090/api/tasks/1 -H $A -H $J -d "{\"title\":\"buy oat milk\"}"
+curl.exe -X PUT http://localhost:8090/api/tasks/$TID -H $A -H $J -d "{\"title\":\"buy oat milk\"}"
 
-curl.exe -i -X DELETE http://localhost:8090/api/tasks/1 -H $A
+curl.exe -i -X DELETE http://localhost:8090/api/tasks/$TID -H $A
 
 # failures
 curl.exe -i http://localhost:8090/api/tasks                                                     # 401 no token
-curl.exe -i -H $B http://localhost:8090/api/tasks/1                                             # 404 Alice's task, as Bob
-curl.exe -i -X PUT http://localhost:8090/api/users/2 -H $A -H $J -d "{\"email\":\"x@y.com\",\"name\":\"X\"}"  # 403 not you
+curl.exe -i http://localhost:8090/api/tasks/not-a-uuid -H $A                                    # 400 id not a UUID
+curl.exe -i -X PUT http://localhost:8090/api/users/$BID -H $A -H $J -d "{\"email\":\"x@y.com\",\"name\":\"X\"}"  # 403 not you ($BID = Bob's uuid)
 curl.exe -i -X POST http://localhost:8090/api/users -H $J -d "{\"email\":\"alice@example.com\",\"name\":\"X\",\"password\":\"password123\"}"  # 409 taken
 curl.exe -i -X POST http://localhost:8090/api/tasks -H $A -H $J -d "{\"title\":\"  \"}"           # 400
 ```

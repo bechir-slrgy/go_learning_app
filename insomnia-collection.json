@@ -17,10 +17,15 @@
       "name": "Base Environment",
       "data": {
         "base_url": "http://localhost:8090",
-        "token": ""
+        "token": "",
+        "task_id": "PASTE_A_TASK_UUID",
+        "user_id": "PASTE_A_USER_UUID",
+        "notification_id": "PASTE_A_NOTIFICATION_UUID",
+        "webhook_id": "PASTE_A_WEBHOOK_UUID",
+        "missing_uuid": "00000000-0000-0000-0000-000000000000"
       },
       "dataPropertyOrder": {
-        "&": ["base_url", "token"]
+        "&": ["base_url", "token", "task_id", "user_id", "notification_id", "webhook_id", "missing_uuid"]
       },
       "metaSortKey": 1
     },
@@ -235,7 +240,7 @@
       "parentId": "fld_users",
       "name": "Read user by id",
       "method": "GET",
-      "url": "{{ _.base_url }}/api/users/1",
+      "url": "{{ _.base_url }}/api/users/{{ _.user_id }}",
       "body": {},
       "headers": [
         {
@@ -251,7 +256,7 @@
       "parentId": "fld_users",
       "name": "Update self",
       "method": "PUT",
-      "url": "{{ _.base_url }}/api/users/1",
+      "url": "{{ _.base_url }}/api/users/{{ _.user_id }}",
       "description": "Works as Alice (user 1). Switch to the 'Local (Bob)' environment and the same request is a 403: you may only edit yourself.",
       "body": {
         "mimeType": "application/json",
@@ -275,7 +280,7 @@
       "parentId": "fld_users",
       "name": "Update someone else (expect 403)",
       "method": "PUT",
-      "url": "{{ _.base_url }}/api/users/2",
+      "url": "{{ _.base_url }}/api/users/{{ _.user_id }}",
       "description": "As Alice, editing Bob is 403 (forbidden), not 404. Users are listable, so hiding their existence would be pointless. Tasks are the opposite: those return 404.",
       "body": {
         "mimeType": "application/json",
@@ -338,7 +343,7 @@
       "parentId": "fld_users",
       "name": "Read missing user (expect 404)",
       "method": "GET",
-      "url": "{{ _.base_url }}/api/users/99999",
+      "url": "{{ _.base_url }}/api/users/{{ _.missing_uuid }}",
       "body": {},
       "headers": [
         {
@@ -354,7 +359,7 @@
       "parentId": "fld_users",
       "name": "Delete self (cascades tasks)",
       "method": "DELETE",
-      "url": "{{ _.base_url }}/api/users/3",
+      "url": "{{ _.base_url }}/api/users/{{ _.user_id }}",
       "description": "Deleting a user deletes their tasks too: tasks.user_id is ON DELETE CASCADE, so Postgres does it. Point this at a user you created via signup, not at Alice or Bob.",
       "body": {},
       "headers": [
@@ -445,7 +450,7 @@
       "parentId": "fld_tasks",
       "name": "Read task by id",
       "method": "GET",
-      "url": "{{ _.base_url }}/api/tasks/1",
+      "url": "{{ _.base_url }}/api/tasks/{{ _.task_id }}",
       "body": {},
       "headers": [
         {
@@ -461,7 +466,7 @@
       "parentId": "fld_tasks",
       "name": "Update task",
       "method": "PUT",
-      "url": "{{ _.base_url }}/api/tasks/1",
+      "url": "{{ _.base_url }}/api/tasks/{{ _.task_id }}",
       "body": {
         "mimeType": "application/json",
         "text": "{\n  \"title\": \"buy oat milk\"\n}"
@@ -484,7 +489,7 @@
       "parentId": "fld_tasks",
       "name": "Delete task",
       "method": "DELETE",
-      "url": "{{ _.base_url }}/api/tasks/1",
+      "url": "{{ _.base_url }}/api/tasks/{{ _.task_id }}",
       "body": {},
       "headers": [
         {
@@ -500,7 +505,7 @@
       "parentId": "fld_tasks",
       "name": "Read someone else's task (expect 404)",
       "method": "GET",
-      "url": "{{ _.base_url }}/api/tasks/3",
+      "url": "{{ _.base_url }}/api/tasks/{{ _.task_id }}",
       "description": "Task 3 belongs to Bob. As Alice this is a 404, not a 403: we don't reveal that it exists. Switch to the 'Local (Bob)' environment and it returns 200.",
       "body": {},
       "headers": [
@@ -517,7 +522,7 @@
       "parentId": "fld_tasks",
       "name": "Read missing (expect 404)",
       "method": "GET",
-      "url": "{{ _.base_url }}/api/tasks/99999",
+      "url": "{{ _.base_url }}/api/tasks/{{ _.missing_uuid }}",
       "body": {},
       "headers": [
         {
@@ -615,7 +620,7 @@
       "parentId": "fld_tasks",
       "name": "Submit task for review (member)",
       "method": "POST",
-      "url": "{{ _.base_url }}/api/tasks/4/submit",
+      "url": "{{ _.base_url }}/api/tasks/{{ _.task_id }}/submit",
       "description": "pending -> submitted. Notifies every admin. Submitting an already-submitted task is a 409. Point the id at a task you own.",
       "body": {},
       "headers": [
@@ -657,7 +662,7 @@
       "parentId": "fld_admin",
       "name": "Approve task",
       "method": "POST",
-      "url": "{{ _.base_url }}/api/admin/tasks/4/approve",
+      "url": "{{ _.base_url }}/api/admin/tasks/{{ _.task_id }}/approve",
       "description": "submitted -> approved (terminal). Notifies the task's owner. Approving anything not 'submitted' is a 409.",
       "body": {},
       "headers": [
@@ -674,7 +679,7 @@
       "parentId": "fld_admin",
       "name": "Reject task",
       "method": "POST",
-      "url": "{{ _.base_url }}/api/admin/tasks/4/reject",
+      "url": "{{ _.base_url }}/api/admin/tasks/{{ _.task_id }}/reject",
       "description": "submitted -> rejected. The member can then submit it again.",
       "body": {},
       "headers": [
@@ -716,7 +721,7 @@
       "parentId": "fld_notifications",
       "name": "Mark notification read",
       "method": "POST",
-      "url": "{{ _.base_url }}/api/notifications/1/read",
+      "url": "{{ _.base_url }}/api/notifications/{{ _.notification_id }}/read",
       "description": "Somebody else's notification is a 404, not a 403.",
       "body": {},
       "headers": [
@@ -805,7 +810,7 @@
       "parentId": "fld_webhooks",
       "name": "Delete webhook",
       "method": "DELETE",
-      "url": "{{ _.base_url }}/api/webhooks/1",
+      "url": "{{ _.base_url }}/api/webhooks/{{ _.webhook_id }}",
       "body": {},
       "headers": [
         {

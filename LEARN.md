@@ -468,7 +468,7 @@ It does **HTTP-shape** validation, a different job from field rules:
 | `http.MaxBytesReader` (1 MiB) | 400 | without it `Decode` reads a 10 GB upload into memory |
 | `DisallowUnknownFields()` | 400 | `{"titel":"x"}` is a client bug; ignoring it saves an empty title and nobody learns why |
 | JSON parses | 400 | malformed syntax |
-| id is a positive integer | 400 | `/tasks/abc` and `/tasks/0` can never match a row |
+| id is a valid UUID | 400 | `/tasks/abc` and `/tasks/1` are not UUIDs, so they can never match a row |
 
 Field rules live in `model`, run by `service`. **Shape here, meaning there.**
 
