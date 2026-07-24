@@ -36,7 +36,6 @@ func (h *UserHandler) Router() http.Handler {
 	return r
 }
 
-
 func (h *UserHandler) me(w http.ResponseWriter, r *http.Request) {
 	claims := userFrom(r.Context())
 	u, err := h.users.Get(r.Context(), claims.ID)
