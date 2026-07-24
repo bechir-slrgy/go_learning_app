@@ -35,9 +35,6 @@ func (a *Auth) RequireUser(next http.Handler) http.Handler {
 
 		user, err := a.tokens.ParseAccess(raw)
 		if err != nil {
-			// Every parse failure (bad signature, expired, wrong issuer) is a
-			// 401 with the same body: never tell a caller why their token was
-			// rejected in a way that helps forge a better one.
 			response.Unauthorized(w, "invalid or expired token")
 			return
 		}
@@ -47,9 +44,6 @@ func (a *Auth) RequireUser(next http.Handler) http.Handler {
 	})
 }
 
-// RequireAdmin is the authorization gate. It runs after RequireUser and reads
-// the role straight off the context (i.e. from the verified token), so an
-// admin check is one comparison and no query.
 func (a *Auth) RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !userFrom(r.Context()).Role.IsAdmin() {

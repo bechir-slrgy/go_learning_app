@@ -34,10 +34,6 @@ func (s *UserService) Get(ctx context.Context, id uuid.UUID) (model.User, error)
 	return s.repo.Get(ctx, id)
 }
 
-// Create is signup: hash the password and store the hash, never the password.
-// bcrypt salts internally and is deliberately slow, so a leaked hash resists
-// brute force. It returns the plain User, with no token: the client gets a
-// token by calling /api/login afterwards.
 func (s *UserService) Create(ctx context.Context, in model.UserInput) (model.User, error) {
 	if err := in.Validate(); err != nil {
 		return model.User{}, err

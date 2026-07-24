@@ -45,8 +45,6 @@ type Task struct {
 	Title  string     `json:"title"`
 	Status TaskStatus `json:"status"`
 
-	// A nullable UUID. *uuid.UUID marshals to JSON null when nil, and
-	// database/sql scans a NULL column straight into the nil pointer.
 	ReviewedBy *uuid.UUID `json:"reviewed_by"`
 	ReviewedAt *time.Time `json:"reviewed_at"`
 

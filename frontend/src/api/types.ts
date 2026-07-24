@@ -2,8 +2,6 @@ export type Role = 'admin' | 'member'
 
 export type TaskStatus = 'pending' | 'submitted' | 'approved' | 'rejected'
 
-// IDs are UUID strings, matching the Go uuid.UUID fields which marshal to a
-// JSON string. They were numbers before the int -> UUID migration.
 export interface User {
   id: string
   email: string

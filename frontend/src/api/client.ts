@@ -42,8 +42,6 @@ export class ApiError extends Error {
   }
 }
 
-// send makes one request with the current access token. It is the low-level
-// call; request() wraps it with the refresh-on-401 retry.
 async function send(path: string, options: RequestInit): Promise<Response> {
   const access = getAccess()
   return fetch(`/api${path}`, {
@@ -56,9 +54,6 @@ async function send(path: string, options: RequestInit): Promise<Response> {
   })
 }
 
-// tryRefresh spends the refresh token for a new pair. Returns true on success.
-// Concurrent 401s could each trigger this; a production client would
-// de-duplicate with a shared promise. Kept simple here.
 async function tryRefresh(): Promise<boolean> {
   const refresh = getRefresh()
   if (!refresh) return false
@@ -76,9 +71,6 @@ async function tryRefresh(): Promise<boolean> {
   return true
 }
 
-// request runs a call, and on a 401 tries exactly once to refresh the access
-// token and replay it. This is why a 15-minute access token is invisible to
-// the user: it silently renews behind the request.
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   let res = await send(path, options)
 
@@ -97,7 +89,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
-  // --- auth (no token needed) ---
   login: async (email: string, password: string): Promise<void> => {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
@@ -116,7 +107,6 @@ export const api = {
     const refresh = getRefresh()
     clearTokens()
     if (refresh) {
-      // Best-effort revoke; the local tokens are already gone.
       await fetch('/api/auth/logout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -125,11 +115,9 @@ export const api = {
     }
   },
 
-  // --- users ---
   me: () => request<User>('/users/me'),
   listUsers: () => request<User[]>('/users'),
 
-  // --- tasks (member) ---
   listTasks: () => request<Task[]>('/tasks'),
   createTask: (title: string) =>
     request<Task>('/tasks', { method: 'POST', body: JSON.stringify({ title }) }),
@@ -140,18 +128,15 @@ export const api = {
   importTasks: (limit: number) =>
     request<Task[]>(`/tasks/import?limit=${limit}`, { method: 'POST' }),
 
-  // --- admin only: 403 for a member ---
   reviewQueue: (status: TaskStatus) => request<Task[]>(`/admin/tasks?status=${status}`),
   approveTask: (id: string) =>
     request<Task>(`/admin/tasks/${id}/approve`, { method: 'POST' }),
   rejectTask: (id: string) =>
     request<Task>(`/admin/tasks/${id}/reject`, { method: 'POST' }),
 
-  // --- notifications ---
   listNotifications: () => request<Notification[]>('/notifications'),
   markRead: (id: string) => request<void>(`/notifications/${id}/read`, { method: 'POST' }),
 
-  // --- webhooks ---
   listWebhooks: () => request<Webhook[]>('/webhooks'),
   createWebhook: (url: string) =>
     request<Webhook>('/webhooks', { method: 'POST', body: JSON.stringify({ url }) }),

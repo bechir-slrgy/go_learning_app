@@ -26,8 +26,6 @@ func (r *RefreshTokenRepo) Create(ctx context.Context, userID uuid.UUID, hash st
 	return err
 }
 
-// ByHash finds a live token by its hash. An expired row is treated as absent,
-// so a stale token can never be exchanged, and expired rows can be swept later.
 func (r *RefreshTokenRepo) ByHash(ctx context.Context, hash string) (model.RefreshToken, error) {
 	var t model.RefreshToken
 	err := r.db.QueryRowContext(ctx,
@@ -40,13 +38,11 @@ func (r *RefreshTokenRepo) ByHash(ctx context.Context, hash string) (model.Refre
 	return t, err
 }
 
-// DeleteByHash removes one token. Used on refresh (rotation) and logout.
 func (r *RefreshTokenRepo) DeleteByHash(ctx context.Context, hash string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM refresh_tokens WHERE token_hash = $1`, hash)
 	return err
 }
 
-// DeleteForUser drops every refresh token a user holds. "Log out everywhere".
 func (r *RefreshTokenRepo) DeleteForUser(ctx context.Context, userID uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM refresh_tokens WHERE user_id = $1`, userID)
 	return err

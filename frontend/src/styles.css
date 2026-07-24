@@ -77,7 +77,6 @@ body {
   min-width: 0;
 }
 
-/* --- tabs --- */
 .tabs {
   display: flex;
   gap: 4px;
@@ -112,7 +111,6 @@ body {
   text-align: center;
 }
 
-/* --- controls --- */
 input,
 select {
   padding: 8px 10px;
@@ -157,7 +155,6 @@ button.danger {
   color: var(--danger);
 }
 
-/* --- lists --- */
 .list {
   list-style: none;
   margin: 16px 0 0;
@@ -184,7 +181,6 @@ button.danger {
   flex: none;
 }
 
-/* --- badges --- */
 .badge {
   padding: 2px 8px;
   border: 1px solid var(--line);
@@ -210,7 +206,6 @@ button.danger {
   border-color: currentColor;
 }
 
-/* --- text --- */
 .muted {
   color: var(--muted);
 }

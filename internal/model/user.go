@@ -57,8 +57,7 @@ func (in *UserInput) Validate() error {
 	if err := in.ValidateProfile(); err != nil {
 		return err
 	}
-	// The password is not trimmed: leading and trailing spaces are legitimate
-	// password characters, and bcrypt caps the input at 72 bytes anyway.
+
 	if len(in.Password) < minPasswordLen {
 		return fmt.Errorf("%w: password must be at least %d characters", ErrInvalid, minPasswordLen)
 	}
@@ -68,21 +67,15 @@ func (in *UserInput) Validate() error {
 	return nil
 }
 
-// LoginInput is the credentials POSTed to /api/login. Deliberately not
-// validated for length: telling an attacker "that is too short to be our
-// password" leaks the rule. A wrong login is always a plain 401.
 type LoginInput struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
-// RefreshInput and its sibling carry the opaque refresh token.
 type RefreshInput struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
-// TokenPair is what login and refresh return. AccessExpiresIn is seconds, so a
-// client knows when to refresh without parsing the JWT.
 type TokenPair struct {
 	AccessToken     string `json:"access_token"`
 	RefreshToken    string `json:"refresh_token"`

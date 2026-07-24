@@ -52,11 +52,6 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pqErr) && pqErr.Code == "23505"
 }
 
-// ByEmailWithHash returns the user and their bcrypt hash, for login only. The
-// hash is a second return value, never a field on model.User, so it cannot
-// leak into a response by accident. Not-found returns ErrUnauthorized, not
-// ErrNotFound: "no such email" and "wrong password" must look identical to the
-// caller or you leak which emails are registered.
 func (r *UserRepo) ByEmailWithHash(ctx context.Context, email string) (model.User, string, error) {
 	var u model.User
 	var hash string

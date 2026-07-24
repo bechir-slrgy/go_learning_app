@@ -14,10 +14,6 @@ type Config struct {
 	RefreshTTL  time.Duration
 }
 
-// devJWTSecret is used only when JWT_SECRET is unset, so the seeded demo flow
-// works out of the box. Running with it logs a loud warning: a production
-// deployment MUST set its own secret, or every token it issues is forgeable by
-// anyone who has read this source.
 const devJWTSecret = "dev-only-insecure-secret-change-me"
 
 func LoadConfig() Config {
