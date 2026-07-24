@@ -24,7 +24,6 @@ func Error(w http.ResponseWriter, status int, message string) {
 	JSON(w, status, ResponseError{Status: status, Message: message})
 }
 
-
 func Unauthorized(w http.ResponseWriter, message string) {
 	w.Header().Set("WWW-Authenticate", `Bearer realm="api"`)
 	Error(w, http.StatusUnauthorized, message)
