@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -21,18 +22,41 @@ type AccessClaims struct {
 	jwt.RegisteredClaims
 }
 
+// TokenService signs access tokens with an RSA private key (RS256) and verifies
+// them with the matching public key. Asymmetric signing means a verifier needs
+// only the public key, never the secret that mints tokens.
 type TokenService struct {
-	secret     []byte
+	signKey    *rsa.PrivateKey
+	verifyKey  *rsa.PublicKey
 	accessTTL  time.Duration
 	refreshTTL time.Duration
 }
 
-func NewTokenService(secret string, accessTTL, refreshTTL time.Duration) *TokenService {
+// NewTokenService takes the RSA private key that signs access tokens; the public
+// key used to verify them is derived from it, so there is only one key to manage.
+func NewTokenService(signKey *rsa.PrivateKey, accessTTL, refreshTTL time.Duration) *TokenService {
 	return &TokenService{
-		secret:     []byte(secret),
+		signKey:    signKey,
+		verifyKey:  &signKey.PublicKey,
 		accessTTL:  accessTTL,
 		refreshTTL: refreshTTL,
 	}
+}
+
+// ParsePrivateKeyPEM parses a PEM-encoded RSA private key (PKCS#1 or PKCS#8),
+// the format produced by `openssl genrsa` or `ssh-keygen -m PEM`.
+func ParsePrivateKeyPEM(pemBytes []byte) (*rsa.PrivateKey, error) {
+	key, err := jwt.ParseRSAPrivateKeyFromPEM(pemBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse RSA private key: %w", err)
+	}
+	return key, nil
+}
+
+// GenerateDevKey mints an in-memory RSA keypair for local development when no
+// key file is configured. Tokens signed with it do not survive a restart.
+func GenerateDevKey() (*rsa.PrivateKey, error) {
+	return rsa.GenerateKey(rand.Reader, 2048)
 }
 
 func (s *TokenService) RefreshTTL() time.Duration { return s.refreshTTL }
@@ -49,8 +73,8 @@ func (s *TokenService) IssueAccess(u model.User, now time.Time) (string, time.Ti
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
 		},
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString(s.secret)
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	signed, err := token.SignedString(s.signKey)
 	if err != nil {
 		return "", time.Time{}, fmt.Errorf("sign access token: %w", err)
 	}
@@ -61,11 +85,11 @@ func (s *TokenService) ParseAccess(raw string) (model.User, error) {
 	var claims AccessClaims
 
 	_, err := jwt.ParseWithClaims(raw, &claims, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, fmt.Errorf("unexpected signing method %v", t.Header["alg"])
 		}
-		return s.secret, nil
-	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithIssuer(issuer))
+		return s.verifyKey, nil
+	}, jwt.WithValidMethods([]string{"RS256"}), jwt.WithIssuer(issuer))
 	if err != nil {
 		return model.User{}, model.ErrUnauthorized
 	}

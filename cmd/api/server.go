@@ -31,7 +31,7 @@ func NewServer(cfg Config) *Server {
 	userRepo := repository.NewUserRepo(db)
 	refreshRepo := repository.NewRefreshTokenRepo(db)
 
-	tokens := auth.NewTokenService(cfg.JWTSecret, cfg.AccessTTL, cfg.RefreshTTL)
+	tokens := auth.NewTokenService(cfg.SignKey, cfg.AccessTTL, cfg.RefreshTTL)
 
 	hooks := service.NewWebhookService(repository.NewWebhookRepo(db), api)
 	notes := service.NewNotificationService(repository.NewNotificationRepo(db), userRepo)

@@ -1,6 +1,9 @@
 # Secrets / local config
 .env
 
+# RSA signing keys (never commit the private key)
+keys/
+
 # Build output
 *.exe
 
@@ -9,3 +12,7 @@ server.out
 server.err
 echo.out
 echo.err
+
+.specstory/
+.impeccable/
+.vscode/
