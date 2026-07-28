@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"task_crud_api/internal/middleware"
 	"task_crud_api/internal/model"
 	"task_crud_api/internal/response"
 	"task_crud_api/internal/service"
@@ -12,10 +13,10 @@ import (
 
 type WebhookHandler struct {
 	hooks *service.WebhookService
-	auth  *Auth
+	auth  *middleware.Auth
 }
 
-func NewWebhookHandler(hooks *service.WebhookService, auth *Auth) *WebhookHandler {
+func NewWebhookHandler(hooks *service.WebhookService, auth *middleware.Auth) *WebhookHandler {
 	return &WebhookHandler{hooks: hooks, auth: auth}
 }
 
@@ -30,7 +31,7 @@ func (h *WebhookHandler) Router() http.Handler {
 }
 
 func (h *WebhookHandler) list(w http.ResponseWriter, r *http.Request) {
-	user := userFrom(r.Context())
+	user := middleware.UserFrom(r.Context())
 
 	hooks, err := h.hooks.List(r.Context(), user.ID)
 	if err != nil {
@@ -41,7 +42,7 @@ func (h *WebhookHandler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WebhookHandler) create(w http.ResponseWriter, r *http.Request) {
-	user := userFrom(r.Context())
+	user := middleware.UserFrom(r.Context())
 	in, ok := decodeJSON[model.WebhookInput](w, r)
 	if !ok {
 		return
@@ -55,7 +56,7 @@ func (h *WebhookHandler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *WebhookHandler) delete(w http.ResponseWriter, r *http.Request) {
-	user := userFrom(r.Context())
+	user := middleware.UserFrom(r.Context())
 	id, ok := parseID(w, r)
 	if !ok {
 		return

@@ -1,4 +1,4 @@
-package handler
+package middleware
 
 import (
 	"context"
@@ -46,7 +46,7 @@ func (a *Auth) RequireUser(next http.Handler) http.Handler {
 
 func (a *Auth) RequireAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !userFrom(r.Context()).Role.IsAdmin() {
+		if !UserFrom(r.Context()).Role.IsAdmin() {
 			response.ErrorFrom(w, model.ErrForbidden)
 			return
 		}
@@ -63,7 +63,7 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimSpace(strings.TrimPrefix(h, prefix))
 }
 
-func userFrom(ctx context.Context) model.User {
+func UserFrom(ctx context.Context) model.User {
 	user, ok := ctx.Value(userKey).(model.User)
 	if !ok {
 		panic("no user in context: route is missing RequireUser middleware")

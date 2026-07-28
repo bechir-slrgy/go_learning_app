@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"task_crud_api/internal/middleware"
 	"task_crud_api/internal/model"
 	"task_crud_api/internal/response"
 	"task_crud_api/internal/service"
@@ -12,10 +13,10 @@ import (
 
 type AdminHandler struct {
 	tasks *service.TaskService
-	auth  *Auth
+	auth  *middleware.Auth
 }
 
-func NewAdminHandler(tasks *service.TaskService, auth *Auth) *AdminHandler {
+func NewAdminHandler(tasks *service.TaskService, auth *middleware.Auth) *AdminHandler {
 	return &AdminHandler{tasks: tasks, auth: auth}
 }
 
@@ -31,7 +32,7 @@ func (h *AdminHandler) Router() http.Handler {
 }
 
 func (h *AdminHandler) queue(w http.ResponseWriter, r *http.Request) {
-	admin := userFrom(r.Context())
+	admin := middleware.UserFrom(r.Context())
 
 	status := model.StatusSubmitted
 	if raw := r.URL.Query().Get("status"); raw != "" {
@@ -55,7 +56,7 @@ func (h *AdminHandler) reject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandler) review(w http.ResponseWriter, r *http.Request, decision model.TaskStatus) {
-	admin := userFrom(r.Context())
+	admin := middleware.UserFrom(r.Context())
 	id, ok := parseID(w, r)
 	if !ok {
 		return

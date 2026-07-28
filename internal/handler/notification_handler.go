@@ -5,16 +5,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"task_crud_api/internal/middleware"
 	"task_crud_api/internal/response"
 	"task_crud_api/internal/service"
 )
 
 type NotificationHandler struct {
 	notes *service.NotificationService
-	auth  *Auth
+	auth  *middleware.Auth
 }
 
-func NewNotificationHandler(notes *service.NotificationService, auth *Auth) *NotificationHandler {
+func NewNotificationHandler(notes *service.NotificationService, auth *middleware.Auth) *NotificationHandler {
 	return &NotificationHandler{notes: notes, auth: auth}
 }
 
@@ -28,7 +29,7 @@ func (h *NotificationHandler) Router() http.Handler {
 }
 
 func (h *NotificationHandler) list(w http.ResponseWriter, r *http.Request) {
-	user := userFrom(r.Context())
+	user := middleware.UserFrom(r.Context())
 
 	notes, err := h.notes.List(r.Context(), user.ID)
 	if err != nil {
@@ -39,7 +40,7 @@ func (h *NotificationHandler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *NotificationHandler) markRead(w http.ResponseWriter, r *http.Request) {
-	user := userFrom(r.Context())
+	user := middleware.UserFrom(r.Context())
 	id, ok := parseID(w, r)
 	if !ok {
 		return

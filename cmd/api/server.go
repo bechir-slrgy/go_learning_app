@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"task_crud_api/internal/auth"
 	"task_crud_api/internal/client"
 	"task_crud_api/internal/handler"
+	"task_crud_api/internal/middleware"
 	"task_crud_api/internal/repository"
 	"task_crud_api/internal/service"
 )
@@ -40,7 +41,7 @@ func NewServer(cfg Config) *Server {
 	users := service.NewUserService(userRepo)
 	authService := service.NewAuthService(userRepo, refreshRepo, tokens)
 
-	guard := handler.NewAuth(tokens)
+	guard := middleware.NewAuth(tokens)
 	authHandler := handler.NewAuthHandler(authService)
 	taskHandler := handler.NewTaskHandler(tasks, guard)
 	userHandler := handler.NewUserHandler(users, guard)
@@ -49,10 +50,10 @@ func NewServer(cfg Config) *Server {
 	noteHandler := handler.NewNotificationHandler(notes, guard)
 
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	r.Use(chimw.Logger)
+	r.Use(chimw.Recoverer)
 
-	r.Use(middleware.Timeout(5 * time.Second))
+	r.Use(chimw.Timeout(5 * time.Second))
 
 	r.Get("/health", handler.Health)
 	r.Mount("/api/auth", authHandler.Router())

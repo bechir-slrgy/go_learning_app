@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"task_crud_api/internal/middleware"
 	"task_crud_api/internal/model"
 	"task_crud_api/internal/response"
 	"task_crud_api/internal/service"
@@ -13,10 +14,10 @@ import (
 
 type TaskHandler struct {
 	tasks *service.TaskService
-	auth  *Auth
+	auth  *middleware.Auth
 }
 
-func NewTaskHandler(tasks *service.TaskService, auth *Auth) *TaskHandler {
+func NewTaskHandler(tasks *service.TaskService, auth *middleware.Auth) *TaskHandler {
 	return &TaskHandler{tasks: tasks, auth: auth}
 }
 
@@ -35,7 +36,7 @@ func (h *TaskHandler) Router() http.Handler {
 }
 
 func (h *TaskHandler) list(w http.ResponseWriter, r *http.Request) {
-	user := userFrom(r.Context())
+	user := middleware.UserFrom(r.Context())
 
 	tasks, err := h.tasks.List(r.Context(), user.ID)
 	if err != nil {
@@ -46,7 +47,7 @@ func (h *TaskHandler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) create(w http.ResponseWriter, r *http.Request) {
-	user := userFrom(r.Context())
+	user := middleware.UserFrom(r.Context())
 	in, ok := decodeJSON[model.TaskInput](w, r)
 	if !ok {
 		return
@@ -60,7 +61,7 @@ func (h *TaskHandler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) importTasks(w http.ResponseWriter, r *http.Request) {
-	user := userFrom(r.Context())
+	user := middleware.UserFrom(r.Context())
 
 	limit := 5
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -81,7 +82,7 @@ func (h *TaskHandler) importTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) get(w http.ResponseWriter, r *http.Request) {
-	user := userFrom(r.Context())
+	user := middleware.UserFrom(r.Context())
 	id, ok := parseID(w, r)
 	if !ok {
 		return
@@ -95,7 +96,7 @@ func (h *TaskHandler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) update(w http.ResponseWriter, r *http.Request) {
-	user := userFrom(r.Context())
+	user := middleware.UserFrom(r.Context())
 	id, ok := parseID(w, r)
 	if !ok {
 		return
@@ -113,7 +114,7 @@ func (h *TaskHandler) update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) submit(w http.ResponseWriter, r *http.Request) {
-	user := userFrom(r.Context())
+	user := middleware.UserFrom(r.Context())
 	id, ok := parseID(w, r)
 	if !ok {
 		return
@@ -127,7 +128,7 @@ func (h *TaskHandler) submit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) delete(w http.ResponseWriter, r *http.Request) {
-	user := userFrom(r.Context())
+	user := middleware.UserFrom(r.Context())
 	id, ok := parseID(w, r)
 	if !ok {
 		return

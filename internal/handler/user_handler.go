@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"task_crud_api/internal/middleware"
 	"task_crud_api/internal/model"
 	"task_crud_api/internal/response"
 	"task_crud_api/internal/service"
@@ -12,10 +13,10 @@ import (
 
 type UserHandler struct {
 	users *service.UserService
-	auth  *Auth
+	auth  *middleware.Auth
 }
 
-func NewUserHandler(users *service.UserService, auth *Auth) *UserHandler {
+func NewUserHandler(users *service.UserService, auth *middleware.Auth) *UserHandler {
 	return &UserHandler{users: users, auth: auth}
 }
 
@@ -37,7 +38,7 @@ func (h *UserHandler) Router() http.Handler {
 }
 
 func (h *UserHandler) me(w http.ResponseWriter, r *http.Request) {
-	claims := userFrom(r.Context())
+	claims := middleware.UserFrom(r.Context())
 	u, err := h.users.Get(r.Context(), claims.ID)
 	if err != nil {
 		response.ErrorFrom(w, err)
@@ -83,7 +84,7 @@ func (h *UserHandler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) update(w http.ResponseWriter, r *http.Request) {
-	user := userFrom(r.Context())
+	user := middleware.UserFrom(r.Context())
 	id, ok := parseID(w, r)
 	if !ok {
 		return
@@ -101,7 +102,7 @@ func (h *UserHandler) update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *UserHandler) delete(w http.ResponseWriter, r *http.Request) {
-	user := userFrom(r.Context())
+	user := middleware.UserFrom(r.Context())
 	id, ok := parseID(w, r)
 	if !ok {
 		return
