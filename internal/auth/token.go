@@ -22,9 +22,6 @@ type AccessClaims struct {
 	jwt.RegisteredClaims
 }
 
-// TokenService signs access tokens with an RSA private key (RS256) and verifies
-// them with the matching public key. Asymmetric signing means a verifier needs
-// only the public key, never the secret that mints tokens.
 type TokenService struct {
 	signKey    *rsa.PrivateKey
 	verifyKey  *rsa.PublicKey
@@ -32,8 +29,6 @@ type TokenService struct {
 	refreshTTL time.Duration
 }
 
-// NewTokenService takes the RSA private key that signs access tokens; the public
-// key used to verify them is derived from it, so there is only one key to manage.
 func NewTokenService(signKey *rsa.PrivateKey, accessTTL, refreshTTL time.Duration) *TokenService {
 	return &TokenService{
 		signKey:    signKey,
@@ -43,8 +38,6 @@ func NewTokenService(signKey *rsa.PrivateKey, accessTTL, refreshTTL time.Duratio
 	}
 }
 
-// ParsePrivateKeyPEM parses a PEM-encoded RSA private key (PKCS#1 or PKCS#8),
-// the format produced by `openssl genrsa` or `ssh-keygen -m PEM`.
 func ParsePrivateKeyPEM(pemBytes []byte) (*rsa.PrivateKey, error) {
 	key, err := jwt.ParseRSAPrivateKeyFromPEM(pemBytes)
 	if err != nil {
@@ -53,8 +46,6 @@ func ParsePrivateKeyPEM(pemBytes []byte) (*rsa.PrivateKey, error) {
 	return key, nil
 }
 
-// GenerateDevKey mints an in-memory RSA keypair for local development when no
-// key file is configured. Tokens signed with it do not survive a restart.
 func GenerateDevKey() (*rsa.PrivateKey, error) {
 	return rsa.GenerateKey(rand.Reader, 2048)
 }

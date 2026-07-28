@@ -27,10 +27,6 @@ func LoadConfig() Config {
 	}
 }
 
-// loadSignKey reads the RSA private key that signs access tokens. If
-// JWT_PRIVATE_KEY_PATH is set, the PEM file there is loaded once at startup;
-// otherwise an ephemeral dev key is generated so the app still runs (tokens do
-// not survive a restart). Verification uses the public key derived from this.
 func loadSignKey() *rsa.PrivateKey {
 	path := os.Getenv("JWT_PRIVATE_KEY_PATH")
 	if path == "" {
