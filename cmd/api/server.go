@@ -7,9 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	chimw "github.com/go-chi/chi/v5/middleware"
-
 	"task_crud_api/internal/auth"
 	"task_crud_api/internal/client"
 	"task_crud_api/internal/handler"
@@ -42,28 +39,9 @@ func NewServer(cfg Config) *Server {
 	authService := service.NewAuthService(userRepo, refreshRepo, tokens)
 
 	guard := middleware.NewAuth(tokens)
-	authHandler := handler.NewAuthHandler(authService)
-	taskHandler := handler.NewTaskHandler(tasks, guard)
-	userHandler := handler.NewUserHandler(users, guard)
-	webhookHandler := handler.NewWebhookHandler(hooks, guard)
-	adminHandler := handler.NewAdminHandler(tasks, guard)
-	noteHandler := handler.NewNotificationHandler(notes, guard)
+	h := handler.NewServer(tasks, users, authService, hooks, notes, guard)
 
-	r := chi.NewRouter()
-	r.Use(chimw.Logger)
-	r.Use(chimw.Recoverer)
-
-	r.Use(chimw.Timeout(5 * time.Second))
-
-	r.Get("/health", handler.Health)
-	r.Mount("/api/auth", authHandler.Router())
-	r.Mount("/api/tasks", taskHandler.Router())
-	r.Mount("/api/users", userHandler.Router())
-	r.Mount("/api/webhooks", webhookHandler.Router())
-	r.Mount("/api/notifications", noteHandler.Router())
-	r.Mount("/api/admin", adminHandler.Router())
-
-	return &Server{cfg: cfg, db: db, router: r}
+	return &Server{cfg: cfg, db: db, router: h.Routes()}
 }
 
 func (s *Server) Run(ctx context.Context) error {

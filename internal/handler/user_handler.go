@@ -3,43 +3,14 @@ package handler
 import (
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"task_crud_api/internal/middleware"
 	"task_crud_api/internal/model"
 	"task_crud_api/internal/response"
-	"task_crud_api/internal/service"
 )
 
-type UserHandler struct {
-	users *service.UserService
-	auth  *middleware.Auth
-}
-
-func NewUserHandler(users *service.UserService, auth *middleware.Auth) *UserHandler {
-	return &UserHandler{users: users, auth: auth}
-}
-
-func (h *UserHandler) Router() http.Handler {
-	r := chi.NewRouter()
-
-	r.Post("/", h.create)
-
-	r.Group(func(r chi.Router) {
-		r.Use(h.auth.RequireUser)
-
-		r.Get("/", h.list)
-		r.Get("/me", h.me)
-		r.Get("/{id}", h.get)
-		r.Put("/{id}", h.update)
-		r.Delete("/{id}", h.delete)
-	})
-	return r
-}
-
-func (h *UserHandler) me(w http.ResponseWriter, r *http.Request) {
+func (s *Server) userMe(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.UserFrom(r.Context())
-	u, err := h.users.Get(r.Context(), claims.ID)
+	u, err := s.users.Get(r.Context(), claims.ID)
 	if err != nil {
 		response.ErrorFrom(w, err)
 		return
@@ -47,8 +18,8 @@ func (h *UserHandler) me(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, u)
 }
 
-func (h *UserHandler) list(w http.ResponseWriter, r *http.Request) {
-	users, err := h.users.List(r.Context())
+func (s *Server) userList(w http.ResponseWriter, r *http.Request) {
+	users, err := s.users.List(r.Context())
 	if err != nil {
 		response.ErrorFrom(w, err)
 		return
@@ -56,12 +27,12 @@ func (h *UserHandler) list(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, users)
 }
 
-func (h *UserHandler) create(w http.ResponseWriter, r *http.Request) {
+func (s *Server) userCreate(w http.ResponseWriter, r *http.Request) {
 	in, ok := decodeJSON[model.UserInput](w, r)
 	if !ok {
 		return
 	}
-	u, err := h.users.Create(r.Context(), in)
+	u, err := s.users.Create(r.Context(), in)
 	if err != nil {
 		response.ErrorFrom(w, err)
 		return
@@ -70,12 +41,12 @@ func (h *UserHandler) create(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusCreated, u)
 }
 
-func (h *UserHandler) get(w http.ResponseWriter, r *http.Request) {
+func (s *Server) userGet(w http.ResponseWriter, r *http.Request) {
 	id, ok := parseID(w, r)
 	if !ok {
 		return
 	}
-	u, err := h.users.Get(r.Context(), id)
+	u, err := s.users.Get(r.Context(), id)
 	if err != nil {
 		response.ErrorFrom(w, err)
 		return
@@ -83,7 +54,7 @@ func (h *UserHandler) get(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, u)
 }
 
-func (h *UserHandler) update(w http.ResponseWriter, r *http.Request) {
+func (s *Server) userUpdate(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFrom(r.Context())
 	id, ok := parseID(w, r)
 	if !ok {
@@ -93,7 +64,7 @@ func (h *UserHandler) update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	u, err := h.users.Update(r.Context(), user.ID, id, in)
+	u, err := s.users.Update(r.Context(), user.ID, id, in)
 	if err != nil {
 		response.ErrorFrom(w, err)
 		return
@@ -101,13 +72,13 @@ func (h *UserHandler) update(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusOK, u)
 }
 
-func (h *UserHandler) delete(w http.ResponseWriter, r *http.Request) {
+func (s *Server) userDelete(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFrom(r.Context())
 	id, ok := parseID(w, r)
 	if !ok {
 		return
 	}
-	if err := h.users.Delete(r.Context(), user.ID, id); err != nil {
+	if err := s.users.Delete(r.Context(), user.ID, id); err != nil {
 		response.ErrorFrom(w, err)
 		return
 	}
