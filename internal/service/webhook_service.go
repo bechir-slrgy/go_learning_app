@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,7 +45,15 @@ func (s *WebhookService) Delete(ctx context.Context, userID, id uuid.UUID) error
 	return s.repo.Delete(ctx, userID, id)
 }
 
-const deliveryTimeout = 20 * time.Second
+const (
+	deliveryTimeout    = 10 * time.Second
+	webhookConcurrency = 8
+)
+
+type deliveryResult struct {
+	hook model.Webhook
+	err  error
+}
 
 func (s *WebhookService) TaskCreated(ctx context.Context, userID uuid.UUID, t model.Task) {
 	event := model.TaskEvent{Event: "task.created", Task: t, SentAt: time.Now()}
@@ -52,20 +61,48 @@ func (s *WebhookService) TaskCreated(ctx context.Context, userID uuid.UUID, t mo
 }
 
 func (s *WebhookService) deliver(ctx context.Context, userID uuid.UUID, event model.TaskEvent) {
-	ctx, cancel := context.WithTimeout(ctx, deliveryTimeout)
-	defer cancel()
-
 	hooks, err := s.repo.List(ctx, userID)
 	if err != nil {
 		log.Printf("webhook: list for user %s: %v", userID, err)
 		return
 	}
+	if len(hooks) == 0 {
+		return
+	}
+
+	sem := make(chan struct{}, webhookConcurrency)
+	results := make(chan deliveryResult, len(hooks))
+	var wg sync.WaitGroup
 
 	for _, h := range hooks {
-		if err := s.poster.PostJSON(ctx, h.URL, event, nil); err != nil {
-			log.Printf("webhook %s (%s): %v", h.ID, h.URL, err)
+		wg.Add(1)
+		go func(h model.Webhook) {
+			defer wg.Done()
+
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			hookCtx, cancel := context.WithTimeout(ctx, deliveryTimeout)
+			defer cancel()
+
+			results <- deliveryResult{hook: h, err: s.poster.PostJSON(hookCtx, h.URL, event, nil)}
+		}(h)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	var delivered, failed int
+	for res := range results {
+		if res.err != nil {
+			failed++
+			log.Printf("webhook %s (%s): %v", res.hook.ID, res.hook.URL, res.err)
 			continue
 		}
-		log.Printf("webhook %s (%s): delivered", h.ID, h.URL)
+		delivered++
+		log.Printf("webhook %s (%s): delivered", res.hook.ID, res.hook.URL)
 	}
+	log.Printf("webhook: user %s event %s -> %d delivered, %d failed of %d", userID, event.Event, delivered, failed, len(hooks))
 }
