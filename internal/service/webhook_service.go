@@ -22,12 +22,16 @@ type Poster interface {
 }
 
 type WebhookService struct {
-	repo   WebhookRepo
-	poster Poster
+	repo    WebhookRepo
+	poster  Poster
+	wg      sync.WaitGroup
+	rootCtx context.Context
+	cancel  context.CancelFunc
 }
 
 func NewWebhookService(repo WebhookRepo, poster Poster) *WebhookService {
-	return &WebhookService{repo: repo, poster: poster}
+	ctx, cancel := context.WithCancel(context.Background())
+	return &WebhookService{repo: repo, poster: poster, rootCtx: ctx, cancel: cancel}
 }
 
 func (s *WebhookService) List(ctx context.Context, userID uuid.UUID) ([]model.Webhook, error) {
@@ -57,7 +61,28 @@ type deliveryResult struct {
 
 func (s *WebhookService) TaskCreated(ctx context.Context, userID uuid.UUID, t model.Task) {
 	event := model.TaskEvent{Event: "task.created", Task: t, SentAt: time.Now()}
-	go s.deliver(context.WithoutCancel(ctx), userID, event)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.deliver(s.rootCtx, userID, event)
+	}()
+}
+
+func (s *WebhookService) Shutdown(ctx context.Context) error {
+	s.cancel()
+
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *WebhookService) deliver(ctx context.Context, userID uuid.UUID, event model.TaskEvent) {
