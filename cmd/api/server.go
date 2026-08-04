@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"task_crud_api/internal/auth"
 	"task_crud_api/internal/client"
 	"task_crud_api/internal/handler"
@@ -18,16 +20,19 @@ import (
 type Server struct {
 	cfg    Config
 	db     *sql.DB
+	rdb    *redis.Client
 	router http.Handler
+	hooks  *service.WebhookService
 }
 
 func NewServer(cfg Config) *Server {
 	db := repository.MustConnect(cfg.DatabaseURL)
+	rdb := repository.MustConnectRedis(cfg.RedisAddr)
 
 	api := client.New(10 * time.Second)
 
 	userRepo := repository.NewUserRepo(db)
-	refreshRepo := repository.NewRefreshTokenRepo(db)
+	refreshRepo := repository.NewRedisRefreshRepo(rdb)
 
 	tokens := auth.NewTokenService(cfg.SignKey, cfg.AccessTTL, cfg.RefreshTTL)
 
@@ -41,7 +46,7 @@ func NewServer(cfg Config) *Server {
 	guard := middleware.NewAuth(tokens)
 	h := handler.NewServer(tasks, users, authService, hooks, notes, guard)
 
-	return &Server{cfg: cfg, db: db, router: h.Routes()}
+	return &Server{cfg: cfg, db: db, rdb: rdb, router: h.Routes(), hooks: hooks}
 }
 
 func (s *Server) Run(ctx context.Context) error {
@@ -67,6 +72,10 @@ func (s *Server) Run(ctx context.Context) error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return err
 	}
+	if err := s.hooks.Shutdown(shutdownCtx); err != nil {
+		log.Printf("webhook drain did not finish: %v", err)
+	}
+	s.rdb.Close()
 	s.db.Close()
 	log.Println("stopped cleanly")
 	return nil

@@ -12,6 +12,7 @@ import (
 type Config struct {
 	Port        string
 	DatabaseURL string
+	RedisAddr   string
 	SignKey     *rsa.PrivateKey
 	AccessTTL   time.Duration
 	RefreshTTL  time.Duration
@@ -21,6 +22,7 @@ func LoadConfig() Config {
 	return Config{
 		Port:        envOr("PORT", "3000"),
 		DatabaseURL: envOr("DATABASE_URL", "postgres://taskuser:taskpass@localhost:5433/tasks?sslmode=disable"),
+		RedisAddr:   envOr("REDIS_ADDR", "localhost:6379"),
 		SignKey:     loadSignKey(),
 		AccessTTL:   15 * time.Minute,
 		RefreshTTL:  7 * 24 * time.Hour,
