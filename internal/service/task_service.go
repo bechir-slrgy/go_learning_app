@@ -11,7 +11,8 @@ import (
 )
 
 type TaskRepo interface {
-	List(ctx context.Context, userID uuid.UUID) ([]model.Task, error)
+	ListPaged(ctx context.Context, userID uuid.UUID, limit, offset int) ([]model.Task, error)
+	CountByUser(ctx context.Context, userID uuid.UUID) (int, error)
 	Get(ctx context.Context, userID, id uuid.UUID) (model.Task, error)
 	Create(ctx context.Context, userID uuid.UUID, title string) (model.Task, error)
 	Update(ctx context.Context, userID, id uuid.UUID, title string) (model.Task, error)
@@ -47,8 +48,19 @@ func NewTaskService(repo TaskRepo, notifier Notifier, fetcher Getter, alerts Ale
 	return &TaskService{repo: repo, notifier: notifier, fetcher: fetcher, alerts: alerts}
 }
 
-func (s *TaskService) List(ctx context.Context, userID uuid.UUID) ([]model.Task, error) {
-	return s.repo.List(ctx, userID)
+func (s *TaskService) List(ctx context.Context, userID uuid.UUID, page, pageSize int) (model.Page[model.Task], error) {
+	total, err := s.repo.CountByUser(ctx, userID)
+	if err != nil {
+		return model.Page[model.Task]{}, err
+	}
+
+	offset := (page - 1) * pageSize
+	items, err := s.repo.ListPaged(ctx, userID, pageSize, offset)
+	if err != nil {
+		return model.Page[model.Task]{}, err
+	}
+
+	return model.NewPage(items, page, pageSize, total), nil
 }
 
 func (s *TaskService) Get(ctx context.Context, userID, id uuid.UUID) (model.Task, error) {

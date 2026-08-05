@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -10,6 +11,18 @@ import (
 
 	"task_crud_api/internal/response"
 )
+
+func queryInt(r *http.Request, key string, def int) int {
+	raw := r.URL.Query().Get(key)
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return def
+	}
+	return n
+}
 
 func decodeJSON[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
 	var v T

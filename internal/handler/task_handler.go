@@ -12,12 +12,24 @@ import (
 func (s *Server) taskList(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFrom(r.Context())
 
-	tasks, err := s.tasks.List(r.Context(), user.ID)
+	page := queryInt(r, "page", 1)
+	if page < 1 {
+		page = 1
+	}
+	pageSize := queryInt(r, "page_size", 20)
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	res, err := s.tasks.List(r.Context(), user.ID, page, pageSize)
 	if err != nil {
 		response.ErrorFrom(w, err)
 		return
 	}
-	response.JSON(w, http.StatusOK, tasks)
+	response.JSON(w, http.StatusOK, res)
 }
 
 func (s *Server) taskCreate(w http.ResponseWriter, r *http.Request) {

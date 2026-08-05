@@ -118,7 +118,7 @@ export const api = {
   me: () => request<User>('/users/me'),
   listUsers: () => request<User[]>('/users'),
 
-  listTasks: () => request<Task[]>('/tasks'),
+  listTasks: () => request<{ items: Task[] }>('/tasks').then((p) => p.items),
   createTask: (title: string) =>
     request<Task>('/tasks', { method: 'POST', body: JSON.stringify({ title }) }),
   updateTask: (id: string, title: string) =>

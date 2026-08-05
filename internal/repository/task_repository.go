@@ -28,13 +28,20 @@ func scanTask(row scanner) (model.Task, error) {
 	return t, err
 }
 
-func (r *TaskRepo) List(ctx context.Context, userID uuid.UUID) ([]model.Task, error) {
+func (r *TaskRepo) ListPaged(ctx context.Context, userID uuid.UUID, limit, offset int) ([]model.Task, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+taskColumns+` FROM tasks WHERE user_id = $1 ORDER BY id`, userID)
+		`SELECT `+taskColumns+` FROM tasks WHERE user_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`,
+		userID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
 	return collectTasks(rows)
+}
+
+func (r *TaskRepo) CountByUser(ctx context.Context, userID uuid.UUID) (int, error) {
+	var n int
+	err := r.db.QueryRowContext(ctx, `SELECT count(*) FROM tasks WHERE user_id = $1`, userID).Scan(&n)
+	return n, err
 }
 
 func (r *TaskRepo) Get(ctx context.Context, userID, id uuid.UUID) (model.Task, error) {
