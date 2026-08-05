@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -132,9 +133,23 @@ func (s *TaskService) Delete(ctx context.Context, userID, id uuid.UUID) error {
 
 const importSource = "https://jsonplaceholder.typicode.com/todos?_limit=%d"
 
+const importWorkers = 5
+
 type externalTodo struct {
 	Title     string `json:"title"`
 	Completed bool   `json:"completed"`
+}
+
+type importJob struct {
+	idx int
+	td  externalTodo
+}
+
+type importResult struct {
+	idx  int
+	task model.Task
+	ok   bool
+	err  error
 }
 
 func (s *TaskService) Import(ctx context.Context, userID uuid.UUID, limit int) ([]model.Task, error) {
@@ -146,25 +161,82 @@ func (s *TaskService) Import(ctx context.Context, userID uuid.UUID, limit int) (
 	if err := s.fetcher.GetJSON(ctx, fmt.Sprintf(importSource, limit), &todos); err != nil {
 		return nil, fmt.Errorf("%w: %v", model.ErrUpstream, err)
 	}
-
-	imported := []model.Task{}
-	for _, td := range todos {
-		in := model.TaskInput{Title: td.Title}
-		if err := in.Validate(); err != nil {
-			continue
-		}
-
-		t, err := s.repo.Create(ctx, userID, in.Title)
-		if err != nil {
-			return imported, err
-		}
-
-		if td.Completed {
-			if t, err = s.repo.SetStatus(ctx, t.ID, model.StatusSubmitted); err != nil {
-				return imported, err
-			}
-		}
-		imported = append(imported, t)
+	if len(todos) == 0 {
+		return []model.Task{}, nil
 	}
-	return imported, nil
+
+	jobs := make(chan importJob)
+	results := make(chan importResult, len(todos))
+
+	workers := importWorkers
+	if len(todos) < workers {
+		workers = len(todos)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				results <- s.importOne(ctx, userID, job)
+			}
+		}()
+	}
+
+	go func() {
+		for i, td := range todos {
+			jobs <- importJob{idx: i, td: td}
+		}
+		close(jobs)
+	}()
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	ordered := make([]model.Task, len(todos))
+	present := make([]bool, len(todos))
+	var firstErr error
+	for res := range results {
+		switch {
+		case res.err != nil:
+			if firstErr == nil {
+				firstErr = res.err
+			}
+		case res.ok:
+			ordered[res.idx] = res.task
+			present[res.idx] = true
+		}
+	}
+
+	imported := make([]model.Task, 0, len(todos))
+	for i := range ordered {
+		if present[i] {
+			imported = append(imported, ordered[i])
+		}
+	}
+	return imported, firstErr
+}
+
+func (s *TaskService) importOne(ctx context.Context, userID uuid.UUID, job importJob) importResult {
+	in := model.TaskInput{Title: job.td.Title}
+	if err := in.Validate(); err != nil {
+		return importResult{idx: job.idx}
+	}
+
+	t, err := s.repo.Create(ctx, userID, in.Title)
+	if err != nil {
+		return importResult{idx: job.idx, err: err}
+	}
+
+	if job.td.Completed {
+		t, err = s.repo.SetStatus(ctx, t.ID, model.StatusSubmitted)
+		if err != nil {
+			return importResult{idx: job.idx, err: err}
+		}
+	}
+
+	return importResult{idx: job.idx, task: t, ok: true}
 }
