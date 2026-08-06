@@ -1,5 +1,6 @@
 import type {
   Notification,
+  Page,
   Task,
   TaskStatus,
   TokenPair,
@@ -118,7 +119,8 @@ export const api = {
   me: () => request<User>('/users/me'),
   listUsers: () => request<User[]>('/users'),
 
-  listTasks: () => request<{ items: Task[] }>('/tasks').then((p) => p.items),
+  listTasks: (page = 1, pageSize = 20) =>
+    request<Page<Task>>(`/tasks?page=${page}&page_size=${pageSize}`),
   createTask: (title: string) =>
     request<Task>('/tasks', { method: 'POST', body: JSON.stringify({ title }) }),
   updateTask: (id: string, title: string) =>

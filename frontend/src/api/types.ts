@@ -36,6 +36,14 @@ export interface Webhook {
   created_at: string
 }
 
+export interface Page<T> {
+  items: T[]
+  page: number
+  page_size: number
+  total: number
+  total_pages: number
+}
+
 export interface ApiErrorBody {
   status: number
   message: string

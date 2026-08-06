@@ -77,6 +77,15 @@ body {
   min-width: 0;
 }
 
+.center {
+  text-align: center;
+}
+
+.pager {
+  margin-top: 12px;
+  justify-content: space-between;
+}
+
 .tabs {
   display: flex;
   gap: 4px;
