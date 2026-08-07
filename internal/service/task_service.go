@@ -2,7 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
+	"io"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -147,6 +151,8 @@ const importSource = "https://jsonplaceholder.typicode.com/todos?_limit=%d"
 
 const importWorkers = 5
 
+const maxCSVRows = 5000
+
 type externalTodo struct {
 	Title     string `json:"title"`
 	Completed bool   `json:"completed"`
@@ -173,6 +179,50 @@ func (s *TaskService) Import(ctx context.Context, userID uuid.UUID, limit int) (
 	if err := s.fetcher.GetJSON(ctx, fmt.Sprintf(importSource, limit), &todos); err != nil {
 		return nil, fmt.Errorf("%w: %v", model.ErrUpstream, err)
 	}
+	return s.importTodos(ctx, userID, todos)
+}
+
+func (s *TaskService) ImportCSV(ctx context.Context, userID uuid.UUID, r io.Reader) ([]model.Task, error) {
+	cr := csv.NewReader(r)
+	cr.FieldsPerRecord = -1
+	cr.TrimLeadingSpace = true
+
+	records, err := cr.ReadAll()
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse csv: %v", model.ErrInvalid, err)
+	}
+
+	todos := make([]externalTodo, 0, len(records))
+	for i, rec := range records {
+		if len(rec) == 0 {
+			continue
+		}
+		title := strings.TrimSpace(rec[0])
+		if i == 0 && strings.EqualFold(title, "title") {
+			continue
+		}
+		if title == "" {
+			continue
+		}
+		completed := false
+		if len(rec) > 1 {
+			completed = parseCSVBool(rec[1])
+		}
+		todos = append(todos, externalTodo{Title: title, Completed: completed})
+		if len(todos) >= maxCSVRows {
+			break
+		}
+	}
+
+	return s.importTodos(ctx, userID, todos)
+}
+
+func parseCSVBool(s string) bool {
+	b, err := strconv.ParseBool(strings.TrimSpace(s))
+	return err == nil && b
+}
+
+func (s *TaskService) importTodos(ctx context.Context, userID uuid.UUID, todos []externalTodo) ([]model.Task, error) {
 	if len(todos) == 0 {
 		return []model.Task{}, nil
 	}

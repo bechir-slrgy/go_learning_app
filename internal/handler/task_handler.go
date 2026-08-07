@@ -67,6 +67,28 @@ func (s *Server) taskImport(w http.ResponseWriter, r *http.Request) {
 	response.JSON(w, http.StatusCreated, tasks)
 }
 
+func (s *Server) taskImportCSV(w http.ResponseWriter, r *http.Request) {
+	user := middleware.UserFrom(r.Context())
+
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		response.Error(w, http.StatusBadRequest, "invalid multipart form")
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		response.Error(w, http.StatusBadRequest, "missing form file field 'file'")
+		return
+	}
+	defer file.Close()
+
+	tasks, err := s.tasks.ImportCSV(r.Context(), user.ID, file)
+	if err != nil {
+		response.ErrorFrom(w, err)
+		return
+	}
+	response.JSON(w, http.StatusCreated, tasks)
+}
+
 func (s *Server) taskGet(w http.ResponseWriter, r *http.Request) {
 	user := middleware.UserFrom(r.Context())
 	id, ok := parseID(w, r)

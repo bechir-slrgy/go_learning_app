@@ -73,6 +73,7 @@ func (s *Server) Routes() http.Handler {
 				r.Get("/", s.taskList)
 				r.Post("/", s.taskCreate)
 				r.Post("/import", s.taskImport)
+				r.Post("/import/csv", s.taskImportCSV)
 				r.Get("/{id}", s.taskGet)
 				r.Put("/{id}", s.taskUpdate)
 				r.Post("/{id}/submit", s.taskSubmit)
